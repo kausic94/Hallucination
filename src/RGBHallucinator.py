@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[ ]:
+# In[1]:
 
 
 import numpy as np
@@ -13,10 +13,11 @@ import os
 import ConfigParser
 import sys
 import argparse 
+import psutil
 Dataset=reload(Dataset)
 
 
-# In[ ]:
+# In[2]:
 
 
 class Hallucinator ():    
@@ -63,7 +64,7 @@ class Hallucinator ():
         self.checkPoint =  bool(config.get('LOG','checkpoint'))
         self.restoreModelPath =config.get('LOG','restoreModelPath')
         self.logDir = config.get('LOG','logFile')
-        
+
         if self.checkPoint:
             print ("Using the latest trained model in check point file")
             self.restoreModelPath = tf.train.latest_checkpoint(self.restoreModelPath)
@@ -143,6 +144,7 @@ class Hallucinator ():
         train_summary_writer=tf.summary.FileWriter(os.path.join(self.summary_writer_dir,'train'),self.sess.graph)
         test_summary_writer=tf.summary.FileWriter(os.path.join(self.summary_writer_dir,'test'),self.sess.graph)
         self.sess.run(tf.global_variables_initializer())
+        process = psutil.Process(os.getpid())
         while not self.dataObj.epoch == self.maxEpoch :
             iters+=1
             inp,gt = self.dataObj.nextTrainBatch()
@@ -150,7 +152,10 @@ class Hallucinator ():
             t1=time.time()
             _,lval,t_summaries = self.sess.run([Trainables,loss,loss_summary], feed_dict= {self.depth : inp,self.rgb : gt})
             train_summary_writer.add_summary(t_summaries,iters)
-            t2=time.time()
+            t2=time.time()         
+            
+            
+            print(process.memory_info().rss/100000.)
             if not iters % self.print_freq:
                 info = "Model Hallucinatore_s{} Epoch  {} : Iteration : {}/{} loss value : {:0.4f} Time per batch : {:0.3f}s \n".format(self.scale,self.dataObj.epoch,iters,(self.dataObj.epoch+1)*int(self.dataObj.dataLength/self.dataObj.batchSize),lval,t2-t1)
                 print (info)   
@@ -191,7 +196,8 @@ class Hallucinator ():
     
     def loss(self):
         return tf.reduce_mean(2*tf.nn.l2_loss(self.outH-self.rgb))/(self.imageHeight*self.imageWidth*self.dataObj.batchSize*self.channels)   
-        
+    def smoothing_loss(self):
+        I_Hgrad = tf.images
     def saveModel(self,iters):
         if not os.path.exists (self.modelLocation):
             os.makedirs(self.modelLocation)
@@ -212,6 +218,7 @@ class Hallucinator ():
 
 
 if __name__ == '__main__':
+    sys.argv=['RGBHallucinator','2','0']
     parser =  argparse.ArgumentParser(description = "Mention the scale and GPU parameters")
     parser.add_argument('scale',type = int ,help = " What scale do you want to train it at ")
     parser.add_argument('gpu',type = int,help = " Which GPU do you want to train it in ")
