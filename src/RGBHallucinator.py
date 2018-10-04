@@ -13,16 +13,8 @@ import os
 import configparser as ConfigParser
 import sys
 import argparse 
-<<<<<<< HEAD
-=======
 import psutil
 Dataset=reload(Dataset)
-
-
-# In[2]:
-
->>>>>>> cefedc7c03a386016a364625caca9c0a92a1b0a9
-
 class Hallucinator ():    
     def __init__ (self,config_file,scale,gpu_num):
         print ("Initializing Hallucinator class")
@@ -68,10 +60,6 @@ class Hallucinator ():
         self.checkPoint = bool(self.checkPoint)
         self.restoreModelPath =config.get('LOG','restoreModelPath')
         self.logDir = config.get('LOG','logFile')
-<<<<<<< HEAD
-=======
-
->>>>>>> cefedc7c03a386016a364625caca9c0a92a1b0a9
         if self.checkPoint:
             print ("Using the latest trained model in check point file")
             self.restoreModelPath = tf.train.latest_checkpoint(self.restoreModelPath)
