@@ -1,8 +1,9 @@
 #!/bin/bash
 #SBATCH -N 1
-#SBATCH -n 16
+#SBATCH -n 8
 #SBATCH -p cidsegpu2
 #SBATCH -q cidsegpu2
+#SBATCH -t 7-00:00
 #SBATCH --gres=gpu:V100:3
 module load opencv/3.4.1 
 module unload python/2.7.14
