@@ -1,8 +1,7 @@
-#!/usr/bin/env python
+
 # coding: utf-8
 
-# In[1]:
-
+# In[7]:
 
 import numpy as np
 import cv2
@@ -14,7 +13,10 @@ import configparser as ConfigParser
 import sys
 import argparse 
 import psutil
-Dataset=reload(Dataset)
+
+
+# In[10]:
+
 class Hallucinator ():    
     def __init__ (self,config_file,scale,gpu_num):
         print ("Initializing Hallucinator class")
@@ -46,20 +48,20 @@ class Hallucinator ():
         self.train_file = config.get ('DATA','train_file')
         self.test_file  = config.get ('DATA','test_file')
         self.batchSize  = int(config.get ('DATA','batchSize'))
-        self.dataArguments = {"imageWidth":self.imageWidth,"imageHeight":self.imageHeight,"channels" : self.channels, "batchSize":self.batchSize,"train_file":self.train_file,"test_file":self.test_file,"scale":self.scale}    
+        self.dataArguments = {"imageWidth":self.imageWidth,"imageHeight":self.imageHeight,                              "channels" : self.channels, "batchSize":self.batchSize,                              "train_file":self.train_file,"test_file":self.test_file,"scale":self.scale}    
         self.maxEpoch=int(config.get('TRAIN','maxEpoch'))
         self.learningRate = float(config.get('TRAIN','learningRate'))
         
         self.print_freq=int(config.get('LOG','print_freq'))
         self.save_freq = int (config.get('LOG','save_freq'))
         self.val_freq = int (config.get('LOG','val_freq'))
-        
-        self.modelLocation = config.get('LOG','modelLocation')
         self.modelName = config.get('LOG','modelName') +"_s{}".format(self.scale)
-        self.checkPoint =  int(config.get('LOG','checkpoint'))
-        self.checkPoint = bool(self.checkPoint)
+        self.modelLocation = config.get('LOG','modelLocation')
+        self.modelLocation = os.path.join(self.modelLocation , self.modelName)
+        self.checkPoint =  bool(int(config.get('LOG','checkpoint')))
         self.restoreModelPath =config.get('LOG','restoreModelPath')
         self.logDir = config.get('LOG','logFile')
+
         if self.checkPoint:
             print ("Using the latest trained model in check point file")
             self.restoreModelPath = tf.train.latest_checkpoint(self.restoreModelPath)
@@ -69,7 +71,7 @@ class Hallucinator ():
     def generateImage(self):  # Inference procedure
         with tf.variable_scope(self.modelName, reuse=tf.AUTO_REUSE):
             #layer 1
-            conv1 = tf.layers.conv2d(inputs=self.depth,filters=147,kernel_size=(11,11),padding="same",name="conv1",kernel_initializer=tf.truncated_normal_initializer)
+            conv1 = tf.layers.conv2d(inputs=self.depth,filters=147,kernel_size=(11,11), padding="same",name="conv1",kernel_initializer=tf.truncated_normal_initializer)
             conv1 = tf.contrib.layers.instance_norm(inputs=conv1)
             conv1 = tf.nn.selu(conv1,name="conv1_actvn")
             
@@ -124,6 +126,7 @@ class Hallucinator ():
         
         
     def train(self):      
+        #with tf.device(self.gpu):
         self.outH=self.generateImage()
         loss= self.loss()
         optimizer=tf.train.AdamOptimizer(learning_rate=self.learningRate)
@@ -142,6 +145,7 @@ class Hallucinator ():
         while not self.dataObj.epoch == self.maxEpoch :
             iters+=1
             inp,gt = self.dataObj.nextTrainBatch()
+            loss = self.loss()
             t1=time.time()
             _,lval,t_summaries = self.sess.run([Trainables,loss,loss_summary], feed_dict= {self.depth : inp,self.rgb : gt})
             train_summary_writer.add_summary(t_summaries,iters)
@@ -197,6 +201,7 @@ class Hallucinator ():
         self.saver.save(self.sess,os.path.join(self.modelLocation,self.modelName),global_step = iters)
         
     def restoreModel(self):
+        print (self.modelLocation)
         if not self.sess is None:
             if self.sess._opened :
                 self.sess.close()
@@ -206,8 +211,11 @@ class Hallucinator ():
         sav.restore(sess,self.restoreModelPath)
         self.sess = sess
 
+
+# In[11]:
+
 if __name__ == '__main__':
-    sys.argv=['RGBHallucinator','2','0']
+    sys.argv=['RGBHallucinator','8','0']
     parser =  argparse.ArgumentParser(description = "Mention the scale and GPU parameters")
     parser.add_argument('scale',type = int ,help = " What scale do you want to train it at ")
     parser.add_argument('gpu',type = int,help = " Which GPU do you want to train it in ")
@@ -216,6 +224,56 @@ if __name__ == '__main__':
     gpu  =args.gpu
     tf.reset_default_graph()
     H = Hallucinator("config.ini",scale,gpu)
-    H.train()
     H.testAll()
+
+
+# In[ ]:
+
+# import matplotlib.pyplot as plt
+# %matplotlib inline
+# h=Hallucinator("config.ini",1,0)
+# inp,gt = h.dataObj.nextTestBatch()
+
+# edge= tf.image.sobel_edges(h.rgb)
+# sess = tf.Session()
+# sess.run(tf.global_variables_initializer())
+# out,edge = sess.run([h.rgb,edge],feed_dict = {h.rgb:gt})
+# sess.close()
+# plt.imshow(out[0])
+
+
+# In[ ]:
+
+# print edge.shape
+
+
+# In[ ]:
+
+# a=edge[0]
+
+
+# In[ ]:
+
+# y = a[:,:,:,0]
+
+
+# In[ ]:
+
+# y.shape
+
+
+# In[ ]:
+
+# plt.imshow(y)
+
+
+# In[ ]:
+
+# x = a[:,:,:,1]
+# plt.imshow(x)
+
+
+# In[ ]:
+
+
 
