@@ -1,21 +1,24 @@
-
+#!/usr/bin/env python
 # coding: utf-8
 
-# In[7]:
+# In[1]:
+
 
 import numpy as np
 import cv2
 import tensorflow as tf
+print (tf.__version__)
 import Dataset
 import time
 import os
 import configparser as ConfigParser
 import sys
 import argparse 
-#import psutil
+import psutil
 
 
-# In[10]:
+# In[16]:
+
 
 class Hallucinator ():    
     def __init__ (self,config_file,scale,gpu_num):
@@ -48,10 +51,12 @@ class Hallucinator ():
         self.train_file = config.get ('DATA','train_file')
         self.test_file  = config.get ('DATA','test_file')
         self.batchSize  = int(config.get ('DATA','batchSize'))
-        self.dataArguments = {"imageWidth":self.imageWidth,"imageHeight":self.imageHeight,                              "channels" : self.channels, "batchSize":self.batchSize,                              "train_file":self.train_file,"test_file":self.test_file,"scale":self.scale}    
+        self.dataArguments = {"imageWidth":self.imageWidth,"imageHeight":self.imageHeight,"channels" : self.channels, "batchSize":self.batchSize,"train_file":self.train_file,"test_file":self.test_file,"scale":self.scale}    
         self.maxEpoch=int(config.get('TRAIN','maxEpoch'))
         self.learningRate = float(config.get('TRAIN','learningRate'))
-        
+        self.huberDelta  = float(config.get('TRAIN','huberDelta'))
+        self.lambda1     = float(config.get('TRAIN','rmse_lambda'))
+        self.lambda2     = float(config.get('TRAIN','smooth_lambda'))
         self.print_freq=int(config.get('LOG','print_freq'))
         self.save_freq = int (config.get('LOG','save_freq'))
         self.val_freq = int (config.get('LOG','val_freq'))
@@ -61,11 +66,11 @@ class Hallucinator ():
         self.checkPoint =  bool(int(config.get('LOG','checkpoint')))
         self.restoreModelPath =config.get('LOG','restoreModelPath')
         self.logDir = config.get('LOG','logFile')
-
         if self.checkPoint:
             print ("Using the latest trained model in check point file")
-            self.restoreModelPath = tf.train.latest_checkpoint(self.restoreModelPath)
-        self.summary_writer_dir =os.path.join(config.get('LOG','summary_writer_dir') ,self.modelName)     
+            self.restoreModelPath = tf.train.latest_checkpoint(self.modelLocation)
+            print (" Model at {} restored".format(self.restoreModelPath))
+        self.summary_writer_dir =os.path.join(config.get('LOG','summary_writer_dir') ,self.modelName)    
         
         
     def generateImage(self):  # Inference procedure
@@ -126,7 +131,6 @@ class Hallucinator ():
         
         
     def train(self):      
-        #with tf.device(self.gpu):
         self.outH=self.generateImage()
         loss= self.loss()
         optimizer=tf.train.AdamOptimizer(learning_rate=self.learningRate)
@@ -141,22 +145,19 @@ class Hallucinator ():
         train_summary_writer=tf.summary.FileWriter(os.path.join(self.summary_writer_dir,'train'),self.sess.graph)
         test_summary_writer=tf.summary.FileWriter(os.path.join(self.summary_writer_dir,'test'),self.sess.graph)
         self.sess.run(tf.global_variables_initializer())
-        #process = psutil.Process(os.getpid())
+        process = psutil.Process(os.getpid())
         while not self.dataObj.epoch == self.maxEpoch :
             iters+=1
             inp,gt = self.dataObj.nextTrainBatch()
-            loss = self.loss()
             t1=time.time()
             _,lval,t_summaries = self.sess.run([Trainables,loss,loss_summary], feed_dict= {self.depth : inp,self.rgb : gt})
             train_summary_writer.add_summary(t_summaries,iters)
-            t2=time.time()         
-            
-            
-            #print(process.memory_info().rss/100000.)
+            t2=time.time()      
             if not iters % self.print_freq:
-                info = "Model Hallucinatore_s{} Epoch  {} : Iteration : {}/{} loss value : {:0.4f} Time per batch : {:0.3f}s \n".format(self.scale,self.dataObj.epoch,iters,(self.maxEpoch)*int(self.dataObj.dataLength/self.dataObj.batchSize),lval,t2-t1)
+                info = "Model Hallucinator_s{} Epoch  {} : Iteration : {}/{} loss value : {:0.4f} \n".format(self.scale,self.dataObj.epoch,iters,(self.maxEpoch)*int(self.dataObj.dataLength/self.dataObj.batchSize),lval) +"Memory used : {:0.4f} GB Time per batch : {:0.3f}s\n".format(process.memory_info().rss/100000000.,t2-t1) 
                 print (info)   
                 self.logger.write(info)
+                
             if not iters % self.save_freq:
                 info="Model Saved at iteration {}\n".format(iters)
                 print (info)
@@ -172,6 +173,7 @@ class Hallucinator ():
                 print (info)
                 self.logger.write(info)
         print ("Training done ")
+        self.saveModel(iters)
         self.logger.close()
     
     def testAll(self):
@@ -180,8 +182,8 @@ class Hallucinator ():
         while not self.dataObj.test_epoch == 1 :
             x,y = self.dataObj.nextTestBatch()
             l = self.sess.run(self.loss(),feed_dict= {self.depth : x, self.rgb :y})
-            print ("Test loss values " , l)
             loss.append(l)
+            print("Test Loss : {}".format(l))
         return np.mean(loss)
         
     def getHallucinatedImages(self,image_list):
@@ -192,10 +194,26 @@ class Hallucinator ():
             output = self.sess.run(generator,{self.depth:img_processed})
             return output
     
-    def loss(self):
-        return tf.reduce_mean(2*tf.nn.l2_loss(self.outH-self.rgb))/(self.imageHeight*self.imageWidth*self.dataObj.batchSize*self.channels)   
+    def loss (self) :
+        return self.lambda1*self.l2_loss() + self.lambda2*self.smoothing_loss()
+
+    def l2_loss(self):
+        return tf.sqrt(tf.losses.mean_squared_error(self.rgb,self.outH))   
+
     def smoothing_loss(self):
-        I_Hgrad = tf.images
+        I_Hgrad    = tf.image.sobel_edges(self.outH)
+        I_Hedge    = I_Hgrad[:,:,:,:,0] + I_Hgrad[:,:,:,:,1]
+        zeros      = tf.zeros_like(I_Hedge)
+        I_Hhuber   = tf.losses.huber_loss(I_Hedge,zeros,delta = self.huberDelta,reduction=tf.losses.Reduction.NONE)
+            
+        I_RGBgrad  = tf.image.sobel_edges(self.rgb)
+        I_RGBedge  = I_RGBgrad[:,:,:,:,0] + I_RGBgrad[:,:,:,:,1]
+        I_RGBhuber = tf.losses.huber_loss(I_RGBedge,zeros,delta = self.huberDelta, reduction=tf.losses.Reduction.NONE)
+
+        edge_aware_weight   = tf.exp(-1*I_RGBhuber)
+        weighted_smooth_img = tf.multiply(I_Hhuber, edge_aware_weight)
+        loss_val = tf.reduce_mean(weighted_smooth_img) 
+        return loss_val
     def saveModel(self,iters):
         if not os.path.exists (self.modelLocation):
             os.makedirs(self.modelLocation)
@@ -211,70 +229,4 @@ class Hallucinator ():
         sav=tf.train.Saver()
         sav.restore(sess,self.restoreModelPath)
         self.sess = sess
-
-
-# In[11]:
-
-if __name__ == '__main__':
-    parser =  argparse.ArgumentParser(description = "Mention the scale and GPU parameters")
-    parser.add_argument('scale',type = int ,help = " What scale do you want to train it at ")
-    parser.add_argument('gpu',type = int,help = " Which GPU do you want to train it in ")
-    args= parser.parse_args()
-    scale=args.scale
-    gpu  =args.gpu
-    tf.reset_default_graph()
-    H = Hallucinator("config.ini",scale,gpu)
-    H.train()
-    H.testAll()
-
-
-# In[ ]:
-
-# import matplotlib.pyplot as plt
-# %matplotlib inline
-# h=Hallucinator("config.ini",1,0)
-# inp,gt = h.dataObj.nextTestBatch()
-
-# edge= tf.image.sobel_edges(h.rgb)
-# sess = tf.Session()
-# sess.run(tf.global_variables_initializer())
-# out,edge = sess.run([h.rgb,edge],feed_dict = {h.rgb:gt})
-# sess.close()
-# plt.imshow(out[0])
-
-
-# In[ ]:
-
-# print edge.shape
-
-
-# In[ ]:
-
-# a=edge[0]
-
-
-# In[ ]:
-
-# y = a[:,:,:,0]
-
-
-# In[ ]:
-
-# y.shape
-
-
-# In[ ]:
-
-# plt.imshow(y)
-
-
-# In[ ]:
-
-# x = a[:,:,:,1]
-# plt.imshow(x)
-
-
-# In[ ]:
-
-
 

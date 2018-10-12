@@ -1,0 +1,5 @@
+*.out
+*.pyc
+test.py
+.ipyn*
+__*
