@@ -8,6 +8,7 @@ import numpy as np
 import cv2
 import matplotlib.pyplot as plt
 from sklearn.utils import shuffle
+#%matplotlib inline
 
 
 # In[2]:
@@ -65,7 +66,7 @@ class dataReader():
         return img_list
     
     def preProcessImages(self,img_list):
-        img_list=[np.float32(i/255.0) for i in img_list]
+        #img_list=[np.float32(i/255.0) for i in img_list]
         img_list=np.asarray(img_list)
         img_list=np.float32(img_list.reshape(-1,self.imgHeight,self.imgWidth,self.imgChannels))
         return img_list
@@ -121,14 +122,10 @@ class dataReader():
         ax[1][1].imshow(test_out)
 
 
-# In[3]:
+# In[ ]:
 
 
-if __name__ == '__main__':
-    D=dataReader("/data/Kausic/NYUD/RAW/train.txt","/data/Kausic/NYUD/RAW/test.txt")
-    #D.vizRandom()
-   # x=D.nextTrainBatch_allScale()
-    #print len(x)
+
 
 
 # In[ ]:
