@@ -15,6 +15,7 @@ import configparser as ConfigParser
 import sys
 import argparse 
 import psutil
+import  resnet18_linknet as ln
 
 
 # In[2]:
@@ -43,6 +44,12 @@ class Hallucinator ():
         self.sess = None
         with open(config_file) as fh :
             self.confInfo = fh.read()
+        if self.model_choice == "linkNet":
+            linkNet = ln.LinkNet_resnt18(self.depth, is_training=self.phase,num_classes =self.channels)
+            out, end_points = linkNet.build_model()
+            self.model = out
+        if self.model_choice == "APG" :
+            self.model = self.generateImage()
             
     def readConfiguration(self,config_file):
         print ("Reading configuration File")
@@ -84,6 +91,9 @@ class Hallucinator ():
         else : 
             self.restoreModelPath = config.get('LOG','restoreModelPath')
         self.summary_writer_dir =os.path.join(config.get('LOG','summary_writer_dir') ,self.modelName)    
+        self.model_choice = config.get('TRAIN','model')
+        
+        
         
     def normalization(self,feat,typeN):
         if typeN == "BATCH":
@@ -232,7 +242,7 @@ class Hallucinator ():
     def train(self):     
         self.logger = open(self.logDir,'w')
         self.logger.write(self.confInfo +'\n\n\n')
-        self.outH=self.generateImage()
+        self.outH=self.model
         loss= self.loss()
         update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
         optimizer=tf.train.AdamOptimizer(learning_rate=self.learningRate)
@@ -331,7 +341,7 @@ class Hallucinator ():
 
         #tf.reset_default_graph()
         sess=tf.Session()
-        self.outH = self.generateImage()
+        self.outH = self.model()
         saver=tf.train.Saver()
         saver.restore(sess,self.restoreModelPath)
         self.sess=sess
@@ -341,7 +351,8 @@ class Hallucinator ():
 
 
 if __name__=='__main__': 
-    H = Hallucinator('config_rmse.ini',4,0)
+    H = Hallucinator('config_test.ini',1,0)
+    H.train()
     H.testAll()
     
 
