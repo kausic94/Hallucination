@@ -341,7 +341,7 @@ class Hallucinator ():
 
         #tf.reset_default_graph()
         sess=tf.Session()
-        self.outH = self.model()
+        self.outH = self.model
         saver=tf.train.Saver()
         saver.restore(sess,self.restoreModelPath)
         self.sess=sess
