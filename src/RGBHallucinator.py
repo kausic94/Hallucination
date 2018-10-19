@@ -83,13 +83,6 @@ class Hallucinator ():
         self.checkPoint =  bool(int(config.get('LOG','checkpoint')))
         #self.restoreModelPath =config.get('LOG','restoreModelPath')
         self.logDir = config.get('LOG','logFile')
-        
-        if self.checkPoint:
-            print ("Using the latest trained model in check point file")
-            self.restoreModelPath = tf.train.latest_checkpoint(self.modelLocation)
-            print (" Model at {} restored".format(self.restoreModelPath))
-        else : 
-            self.restoreModelPath = config.get('LOG','restoreModelPath')
         self.summary_writer_dir =os.path.join(config.get('LOG','summary_writer_dir') ,self.modelName)    
         self.model_choice = config.get('TRAIN','model')
         
@@ -290,6 +283,7 @@ class Hallucinator ():
         self.logger.close()
     
     def testAll(self):
+        self.dataObj.resetTestBatch()
         self.restoreModel()
         loss=[]
         while not self.dataObj.test_epoch == 1 :
@@ -334,7 +328,13 @@ class Hallucinator ():
         self.saver.save(self.sess,os.path.join(self.modelLocation,self.modelName),global_step = iters)
         
     def restoreModel(self):
-        print (self.modelLocation)
+        if self.checkPoint:
+            print ("Using the latest trained model in check point file")
+            self.restoreModelPath = tf.train.latest_checkpoint(self.modelLocation)
+            print (" Model at {} restored".format(self.restoreModelPath))
+        else : 
+            self.restoreModelPath = config.get('LOG','restoreModelPath')
+            
         if not self.sess is None:
             if self.sess._opened :
                 self.sess.close()
