@@ -85,7 +85,13 @@ class dataReader():
             self.end=self.batchSize
             self.train_depth,self.train_rgb=shuffle(self.train_depth,self.train_rgb)
         return (inp,gt)
-
+    
+    def resetTestBatch(self):
+        self.test_epoch=0
+        self.test_start=0
+        self.test_end=self.batchSize
+        print ("Test batch handlers reset")
+        
     def nextTestBatch(self):
         inp=self.test_depth[self.test_start:self.test_end]
         gt=self.test_rgb[self.test_start:self.test_end]
