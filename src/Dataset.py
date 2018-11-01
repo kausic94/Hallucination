@@ -11,7 +11,7 @@ from sklearn.utils import shuffle
 #%matplotlib inline
 
 
-# In[2]:
+# In[1]:
 
 
 class dataReader():
@@ -33,6 +33,36 @@ class dataReader():
         self.imgHeight=data["imageHeight"]
         self.imgChannels=data["channels"]
         self.dataLength = len(self.train_depth)
+        if data["colorSpace"] == "RGB":
+            self.colorSpace = cv2.COLOR_BGR2RGB
+            self.colorSpaceRevert = cv2.COLOR_RGB2BGR
+        elif data["colorSpace"]== "HSV":
+            self.colorSpace = cv2.COLOR_BGR2HSV
+            self.colorSpaceRevert = cv2.COLOR_HSV2BGR
+        elif data["colorSpace"]== "LUV":
+            self.colorSpace = cv2.COLOR_BGR2LUV
+            self.colorSpaceRevert = cv2.COLOR_LUV2BGR
+        elif data["colorSpace"]== "LAB":
+            self.colorSpace = cv2.COLOR_BGR2LAB
+            self.colorSpaceRevert = cv2.COLOR_LAB2BGR
+        elif data["colorSpace"]== "LAB":
+            self.colorSpace = cv2.COLOR_BGR2LAB
+            self.colorSpaceRevert = cv2.COLOR_LAB2BGR
+        elif data["colorSpace"]== "YCrCb":
+            self.colorSpace = cv2.COLOR_BGR2YCrCb
+            self.colorSpaceRevert = cv2.COLOR_YCrCb2BGR
+        elif data["colorSpace"]== "HLS":
+            self.colorSpace = cv2.COLOR_BGR2HLS
+            self.colorSpaceRevert = cv2.COLOR_HLS2BGR
+        elif data["colorSpace"]== "XYZ":
+            self.colorSpace = cv2.COLOR_BGR2XYZ
+            self.colorSpaceRevert = cv2.COLOR_XYZ2BGR
+        elif data["colorSpace"]== "YUV":
+            self.colorSpace = cv2.COLOR_BGR2YUV
+            self.colorSpaceRevert = cv2.COLOR_YUV2BGR
+            
+            
+        
         assert len(self.train_depth)==len(self.train_rgb),"Inconsistent length of training input and output"
         assert len(self.test_depth) == len(self.test_rgb),"Inconsistent length of testing input and output"
         print ("Train files {}".format(len(self.train_depth)))
@@ -53,10 +83,12 @@ class dataReader():
                 self.test_depth.append(data[0])
                 self.test_rgb.append(data[1][:-1]) # exclude the final \n
                 
-    def loadImages(self,imgs):
+    def loadImages(self,imgs,colorConversion):
         img_list=[]
         for i in imgs:
             img=cv2.imread(i)
+            if colorConversion:
+                img=cv2.cvtColor(img,self.colorSpace)
             img=cv2.resize(img,(self.imgWidth,self.imgHeight))
             if not img is None:
                 img_list.append(img)
@@ -64,6 +96,10 @@ class dataReader():
                 continue
         img_list = self.preProcessImages(img_list)
         return img_list
+    
+    def postProcessImages(self,images):
+        list_images = [cv2.cvtColor(np.uint8(img),self.colorSpaceRevert) for img in images]
+        return list_images
     
     def preProcessImages(self,img_list):
         #img_list=[np.float32(i/255.0) for i in img_list]
@@ -74,8 +110,8 @@ class dataReader():
     def nextTrainBatch(self):
         inp=self.train_depth[self.start:self.end]
         gt=self.train_rgb[self.start:self.end]
-        inp=self.loadImages(inp)
-        gt=self.loadImages(gt)
+        inp=self.loadImages(inp,False)
+        gt=self.loadImages(gt,True)
         self.start=self.end
         self.end+=self.batchSize
         if self.end >= len(self.train_depth):
@@ -95,8 +131,8 @@ class dataReader():
     def nextTestBatch(self):
         inp=self.test_depth[self.test_start:self.test_end]
         gt=self.test_rgb[self.test_start:self.test_end]
-        inp=self.loadImages(inp)
-        gt=self.loadImages(gt)
+        inp=self.loadImages(inp,False)
+        gt=self.loadImages(gt,True)
         self.test_start=self.test_end
         self.test_end+=self.batchSize
         if self.test_end >= len(self.test_depth):
