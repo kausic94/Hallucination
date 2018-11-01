@@ -61,12 +61,17 @@ class Hallucinator ():
         self.train_file = config.get ('DATA','train_file')
         self.test_file  = config.get ('DATA','test_file')
         self.batchSize  = int(config.get ('DATA','batchSize'))
-        self.dataArguments = {"imageWidth":self.imageWidth,"imageHeight":self.imageHeight,"channels" : self.channels, "batchSize":self.batchSize,"train_file":self.train_file,"test_file":self.test_file,"scale":self.scale}    
+        self.colorLossType= config.get('DATA','colorLossType')
+        self.dataArguments = {"imageWidth":self.imageWidth,"imageHeight":self.imageHeight,"channels" : self.channels, "batchSize":self.batchSize,"train_file":self.train_file,"test_file":self.test_file,"scale":self.scale,"colorSpace":self.colorLossType}    
         self.maxEpoch=int(config.get('TRAIN','maxEpoch'))
         self.learningRate = float(config.get('TRAIN','learningRate'))
         self.huberDelta  = float(config.get('TRAIN','huberDelta'))
         self.lambda1     = float(config.get('TRAIN','rmse_lambda'))
         self.lambda2     = float(config.get('TRAIN','smooth_lambda'))
+        self.lambda3     = float(config.get('TRAIN','colorLoss_lambda'))
+        self.model_choice = config.get('TRAIN','model')
+        
+        
         if int(config.get('TRAIN','activation')) == 0:
             self.activation = tf.nn.relu
             print("Relu activation has been chosen")
@@ -84,7 +89,7 @@ class Hallucinator ():
         #self.restoreModelPath =config.get('LOG','restoreModelPath')
         self.logDir = config.get('LOG','logFile')
         self.summary_writer_dir =os.path.join(config.get('LOG','summary_writer_dir') ,self.modelName)    
-        self.model_choice = config.get('TRAIN','model')
+        
         
         
         
@@ -237,6 +242,7 @@ class Hallucinator ():
         self.logger.write(self.confInfo +'\n\n\n')
         self.outH=self.model
         loss= self.loss()
+        
         update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
         optimizer=tf.train.AdamOptimizer(learning_rate=self.learningRate)
         with tf.control_dependencies(update_ops): 
@@ -256,11 +262,12 @@ class Hallucinator ():
             iters+=1
             inp,gt = self.dataObj.nextTrainBatch()
             t1=time.time()
+            lval= self.sess.run(loss, feed_dict= {self.depth : inp,self.phase : True ,self.rgb : gt})
             _,lval,t_summaries = self.sess.run([Trainables,loss,loss_summary], feed_dict= {self.depth : inp,self.phase : True ,self.rgb : gt})
             train_summary_writer.add_summary(t_summaries,iters)
             t2=time.time()      
             if not iters % self.print_freq:
-                info = "Model Hallucinator_s{} Epoch  {} : Iteration : {}/{} loss value : {:0.4f} \n".format(self.scale,self.dataObj.epoch,iters,(self.maxEpoch)*int(self.dataObj.dataLength/self.dataObj.batchSize),lval) +"Memory used : {:0.4f} GB Time per batch : {:0.3f}s\n".format(process.memory_info().rss/100000000.,t2-t1) 
+                info = "Model Hallucinator_s{} Epoch  {} : Iteration : {}/{} loss value : {:0.4f} \n".format(self.scale,self.dataObj.epoch,iters,(self.maxEpoch)*int(self.dataObj.dataLength/self.dataObj.batchSize),lval) +"Memory used : {:0.4f} GB Time per batch : {:0.3f}s Model : {} \n".format(process.memory_info().rss/100000000.,t2-t1,self.modelName) 
                 print (info)   
                 self.logger.write(info)
                 
@@ -290,20 +297,21 @@ class Hallucinator ():
             x,y = self.dataObj.nextTestBatch()
             l = self.sess.run(self.loss(),feed_dict= {self.depth : x, self.rgb :y,self.phase : False})
             loss.append(l)
-            print("Test Loss : {}".format(l))
+            print("Test itr : {} Model: {} Test Loss : {}".format(self.dataObj.test_start,self.modelName,l))
         return np.mean(loss)
         
     def getHallucinatedImages(self,image_list):
         #with tf.device(self.gpu):
         self.restoreModel()
-        img_processed= self.dataObj.loadImages(image_list)
+        img_processed= self.dataObj.loadImages(image_list,False)
         #generator = self.generateImage()
         output = self.sess.run(self.outH,{self.depth:img_processed,self.phase : False})
+        output = self.dataObj.postProcessImages(output)
         return output
-    def loss_ (self) :
-        return tf.reduce_mean(2*tf.nn.l2_loss(self.outH-self.rgb))#/(img_ht*img_w*BATCH_SIZE*3)
+    
     def loss (self) :
-        return self.lambda1*self.l2_loss() + self.lambda2*self.smoothing_loss()
+        
+        return self.lambda1*self.l2_loss() + self.lambda2*self.smoothing_loss() 
 
     def l2_loss(self):
         return tf.sqrt(tf.losses.mean_squared_error(self.rgb,self.outH))   
@@ -322,6 +330,68 @@ class Hallucinator ():
         weighted_smooth_img = tf.multiply(I_Hhuber, edge_aware_weight)
         loss_val = tf.reduce_mean(weighted_smooth_img) 
         return loss_val
+    
+    def hist_func(self,img):
+        img = img
+        #mg =tf.image.convert_image_dtype(img,tf.uint8)
+        #mg =tf.image.convert_image_dtype(img,tf.float32)
+        #ntImg = tf.cast(img,tf.float32)
+        return tf.reduce_mean(img)
+        
+        
+        hal = tf.transpose(intImg,[2, 0, 1])
+        hal_hist = tf.map_fn(lambda x: tf.histogram_fixed_width(x,[0,255],256),hal)
+        hal_hist = tf.cast(hal_hist,tf.float32)
+        
+        return hal_hist
+
+    def KL_div (self,hist_vals):
+        hist_vals= tf.cast(hist_vals,dtype =tf.float32)
+        hal = hist_vals[0]
+        rgb = hist_vals[1]
+        rgb_dist,hal_dist = [],[]
+        alpha=.000000001
+        uni_const = alpha*(1./256.)
+        #Smoothing with uniform function for KL divergence compatibility
+        for i in range(3):
+            rgb_dist.append( uni_const + (1-alpha)*(rgb[i]/tf.reduce_sum(rgb[i])))
+            hal_dist.append( uni_const + (1-alpha)*(hal[i]/tf.reduce_sum(hal[i])))
+
+        b,g,r = rgb_dist[0],rgb_dist[1],rgb_dist[2]        #its actually in the RGB format but it won't matter here
+        h_b,h_g,h_r = hal_dist[0],hal_dist[1],hal_dist[2]
+        # converting to categorical for KL compatibility
+        b=tf.distributions.Categorical(probs=b)
+        g=tf.distributions.Categorical(probs=g)
+        r=tf.distributions.Categorical(probs=r)
+        
+        h_b=tf.distributions.Categorical(probs=h_b)
+        h_g=tf.distributions.Categorical(probs=h_g)
+        h_r=tf.distributions.Categorical(probs=h_r)
+
+        #KL Divergence of the different channels
+        kl_ch_0 = tf.distributions.kl_divergence(b,h_b,allow_nan_stats=False)
+        kl_ch_1 = tf.distributions.kl_divergence(g,h_g,allow_nan_stats=False)
+        kl_ch_2 = tf.distributions.kl_divergence(r,h_r,allow_nan_stats=False)
+        return kl_ch_0 + kl_ch_1 + kl_ch_2
+
+    
+    def color_loss_ (self):
+        hal_hist  = tf.map_fn(self.hist_func,self.outH,dtype=tf.float32) #hallucinated
+        
+        if self.colorLossType == 'rgb':
+            truth_data = self.rgb
+        if self.colorLossType == 'hsv':
+            truth_data = tf.image.rgb_to_hsv(self.rgb)
+        if self.colorLossType == 'yiq':
+            truth_data = tf.image.rgb_to_yiq(self.rgb)
+        if self.colorLossType == 'yuv':
+            truth_data = tf.image.rgb_to_yuv(self.rgb)
+        truth_hist = tf.map_fn(self.hist_func,truth_data,dtype=tf.float32) #rgb/hsv/yuv
+        hist  = tf.stack([hal_hist,truth_hist],1)
+        kl_vals = tf.map_fn(self.KL_div , hist,dtype=tf.float32)
+        
+        return tf.reduce_mean(kl_vals)
+   
     def saveModel(self,iters):
         if not os.path.exists (self.modelLocation):
             os.makedirs(self.modelLocation)
@@ -350,11 +420,25 @@ class Hallucinator ():
 # In[3]:
 
 
-if __name__=='__main__': 
-    H = Hallucinator('config_test.ini',1,0)
+if __name__=='__main__':
+    tf.reset_default_graph()
+    H = Hallucinator('config_linknet_hsv.ini',1,0)
     H.train()
     H.testAll()
     
+    
+
+
+# In[ ]:
+
+
+
+
+
+# In[ ]:
+
+
+
 
 
 # In[ ]:
