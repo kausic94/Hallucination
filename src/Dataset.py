@@ -8,10 +8,11 @@ import numpy as np
 import cv2
 import matplotlib.pyplot as plt
 from sklearn.utils import shuffle
+from skimage.util import random_noise
 #%matplotlib inline
 
 
-# In[1]:
+# In[2]:
 
 
 class dataReader():
@@ -32,7 +33,12 @@ class dataReader():
         self.imgWidth=data["imageWidth"]
         self.imgHeight=data["imageHeight"]
         self.imgChannels=data["channels"]
+        self.corruptionLevel = data["corruptionLevel"]
         self.dataLength = len(self.train_depth)
+        if data["colorSpace"] == "BGR":
+            self.colorSpace = None
+            self.colorSpaceRevert = None
+            
         if data["colorSpace"] == "RGB":
             self.colorSpace = cv2.COLOR_BGR2RGB
             self.colorSpaceRevert = cv2.COLOR_RGB2BGR
@@ -61,8 +67,6 @@ class dataReader():
             self.colorSpace = cv2.COLOR_BGR2YUV
             self.colorSpaceRevert = cv2.COLOR_YUV2BGR
             
-            
-        
         assert len(self.train_depth)==len(self.train_rgb),"Inconsistent length of training input and output"
         assert len(self.test_depth) == len(self.test_rgb),"Inconsistent length of testing input and output"
         print ("Train files {}".format(len(self.train_depth)))
@@ -83,10 +87,13 @@ class dataReader():
                 self.test_depth.append(data[0])
                 self.test_rgb.append(data[1][:-1]) # exclude the final \n
                 
-    def loadImages(self,imgs,colorConversion):
+    def loadImages(self,imgs,colorConversion, corruption):
         img_list=[]
         for i in imgs:
             img=cv2.imread(i)
+            if corruption == True :
+                img = random_noise(img/255.0,mode='s&p',amount= self.corruptionLevel)
+                img = np.uint8(img*255.)     
             if colorConversion:
                 img=cv2.cvtColor(img,self.colorSpace)
             img=cv2.resize(img,(self.imgWidth,self.imgHeight))
@@ -98,6 +105,8 @@ class dataReader():
         return img_list
     
     def postProcessImages(self,images):
+        if self.colorSpaceRevert is None :
+            return images
         list_images = [cv2.cvtColor(np.uint8(img),self.colorSpaceRevert) for img in images]
         return list_images
     
@@ -107,11 +116,11 @@ class dataReader():
         img_list=np.float32(img_list.reshape(-1,self.imgHeight,self.imgWidth,self.imgChannels))
         return img_list
         
-    def nextTrainBatch(self):
+    def nextTrainBatch(self,corruptionFlag):
         inp=self.train_depth[self.start:self.end]
         gt=self.train_rgb[self.start:self.end]
-        inp=self.loadImages(inp,False)
-        gt=self.loadImages(gt,True)
+        inp=self.loadImages(inp,False, False)
+        gt=self.loadImages(gt,True,corruptionFlag)
         self.start=self.end
         self.end+=self.batchSize
         if self.end >= len(self.train_depth):
@@ -120,19 +129,24 @@ class dataReader():
             self.start=0
             self.end=self.batchSize
             self.train_depth,self.train_rgb=shuffle(self.train_depth,self.train_rgb)
-        return (inp,gt)
-    
+        return (inp,gt)    
+    def resetTrainBatch(self):
+        self.epoch = 0
+        self.start = 0
+        self.end   = self.batchSize
+        print("Train batch handlers reset")
+        
     def resetTestBatch(self):
         self.test_epoch=0
         self.test_start=0
         self.test_end=self.batchSize
         print ("Test batch handlers reset")
         
-    def nextTestBatch(self):
+    def nextTestBatch(self,corruptionFlag):
         inp=self.test_depth[self.test_start:self.test_end]
         gt=self.test_rgb[self.test_start:self.test_end]
-        inp=self.loadImages(inp,False)
-        gt=self.loadImages(gt,True)
+        inp=self.loadImages(inp,False,False)
+        gt=self.loadImages(gt,True,corruptionFlag)
         self.test_start=self.test_end
         self.test_end+=self.batchSize
         if self.test_end >= len(self.test_depth):
@@ -164,16 +178,25 @@ class dataReader():
         ax[1][1].imshow(test_out)
 
 
-# In[ ]:
+# In[16]:
 
 
+if __name__ == '__main__':
+    data = {"scale":1,"batchSize":4,"train_file" : "/home/kgunase3/data/NYUD/RAW/train.txt",
+            "test_file" : '/home/kgunase3/data/NYUD/RAW/train.txt', "colorSpace":"RGB", 
+            "imageWidth" : 640,"imageHeight" :480, "channels":3,"corruptionLevel" : 0.3}
+    dataObj = dataReader(data)
+    inp,gt = dataObj.nextTrainBatch(corruptionFlag= True)
+    print (gt.shape)
 
 
-
-# In[ ]:
-
+# In[17]:
 
 
+import matplotlib.pyplot as plt
+plt.imshow(np.uint8(gt[0]))
+plt.figure()
+plt.imshow(np.uint8(gt[1]))
 
 
 # In[ ]:
