@@ -11,7 +11,7 @@ from sklearn.utils import shuffle
 from skimage.util import random_noise
 
 
-# In[2]:
+# In[12]:
 
 
 class dataReader():
@@ -116,6 +116,7 @@ class dataReader():
         return img_list
         
     def nextTrainBatch(self,corruptionFlag):
+        print (self.train_rgb[self.start:self.end])
         inp=self.train_depth[self.start:self.end]
         gt=self.train_rgb[self.start:self.end]
         inp=self.loadImages(inp,False, False)
@@ -128,7 +129,23 @@ class dataReader():
             self.start=0
             self.end=self.batchSize
             self.train_depth,self.train_rgb=shuffle(self.train_depth,self.train_rgb)
-        return (inp,gt)    
+        return (inp,gt)
+    
+    def nextAutoencoderTrainBatch(self,corruptionFlag):
+        inp=self.train_rgb[self.start:self.end]
+        gt=self.train_rgb[self.start:self.end]
+        inp=self.loadImages(inp,True, corruptionFlag)
+        gt=self.loadImages(gt,True,False)
+        self.start=self.end
+        self.end+=self.batchSize
+        if self.end >= len(self.train_depth):
+            self.epoch+=1
+            print("************** Training data : EPOCH {} COMPLETED************\n\n".format(self.epoch))
+            self.start=0
+            self.end=self.batchSize
+            self.train_depth,self.train_rgb=shuffle(self.train_depth,self.train_rgb)
+        return (inp,gt)
+    
     def resetTrainBatch(self):
         self.epoch = 0
         self.start = 0
@@ -142,10 +159,26 @@ class dataReader():
         print ("Test batch handlers reset")
         
     def nextTestBatch(self,corruptionFlag):
+        print (self.test_rgb[self.test_start:self.test_end])
         inp=self.test_depth[self.test_start:self.test_end]
         gt=self.test_rgb[self.test_start:self.test_end]
         inp=self.loadImages(inp,False,False)
         gt=self.loadImages(gt,True,corruptionFlag)
+        self.test_start=self.test_end
+        self.test_end+=self.batchSize
+        if self.test_end >= len(self.test_depth):
+            self.test_epoch+=1
+            print("*************Testing data : EPOCH {} COMPLETED ************ \n\n".format(self.test_epoch))
+            self.test_start=0
+            self.test_end=self.batchSize
+            self.test_depth,self.test_rgb = shuffle(self.test_depth,self.test_rgb)
+        return (inp,gt)
+    
+    def nextAutoencoderTestBatch(self,corruptionFlag):
+        inp=self.test_rgb[self.test_start:self.test_end]
+        gt=self.test_rgb[self.test_start:self.test_end]
+        inp=self.loadImages(inp,True,corruptionFlag)
+        gt=self.loadImages(gt,True,False)
         self.test_start=self.test_end
         self.test_end+=self.batchSize
         if self.test_end >= len(self.test_depth):
@@ -176,3 +209,21 @@ class dataReader():
         ax[1][1].set_title("Test Output")
         ax[1][1].imshow(test_out)
 
+
+# In[26]:
+
+
+if __name__ == '__main__':
+    data = {"scale":1,"batchSize":4,"train_file" : "/home/kgunase3/data/NYUD/RAW/train.txt",
+            "test_file" : '/home/kgunase3/data/NYUD/RAW/test.txt', "colorSpace":"RGB", 
+            "imageWidth" : 640,"imageHeight" :480, "channels":3,"corruptionLevel" : 0.25}
+    dataObj = dataReader(data)
+    inp,gt = dataObj.nextAutoencoderTestBatch(corruptionFlag = True)
+    print (gt1.shape)
+
+    ind= 0
+    import matplotlib.pyplot as plt
+    plt.imshow(np.uint8(inp[ind]))
+    plt.figure()
+    plt.imshow(np.uint8(gt[ind]))
+    
