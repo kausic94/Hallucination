@@ -9,7 +9,6 @@ import cv2
 import matplotlib.pyplot as plt
 from sklearn.utils import shuffle
 from skimage.util import random_noise
-#%matplotlib inline
 
 
 # In[2]:
@@ -176,55 +175,4 @@ class dataReader():
         ax[1][0].imshow(test_in)
         ax[1][1].set_title("Test Output")
         ax[1][1].imshow(test_out)
-
-
-# In[16]:
-
-
-if __name__ == '__main__':
-    data = {"scale":1,"batchSize":4,"train_file" : "/home/kgunase3/data/NYUD/RAW/train.txt",
-            "test_file" : '/home/kgunase3/data/NYUD/RAW/train.txt', "colorSpace":"RGB", 
-            "imageWidth" : 640,"imageHeight" :480, "channels":3,"corruptionLevel" : 0.3}
-    dataObj = dataReader(data)
-    inp,gt = dataObj.nextTrainBatch(corruptionFlag= True)
-    print (gt.shape)
-
-
-# In[17]:
-
-
-import matplotlib.pyplot as plt
-plt.imshow(np.uint8(gt[0]))
-plt.figure()
-plt.imshow(np.uint8(gt[1]))
-
-
-# In[ ]:
-
-
-
-
-
-# In[ ]:
-
-
-
-
-
-# In[ ]:
-
-
-
-
-
-# In[ ]:
-
-
-
-
-
-# In[ ]:
-
-
-
 
