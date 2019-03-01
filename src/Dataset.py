@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[1]:
+# In[4]:
 
 
 import numpy as np
@@ -27,8 +27,12 @@ class dataReader():
         self.test_end=self.batchSize
         self.train_depth,self.train_rgb=[],[]
         self.test_depth,self.test_rgb =[],[]
+        self.autoencoder_train_input,self.autoencoder_train_output = [],[]
+        self.autoencoder_test_input,self.autoencoder_test_output = [],[]
         self.loadTrain(data["train_file"])
+        self.loadAutoencoderTrain(data["autoencoder_train_file"])
         self.loadTest(data["test_file"])
+        self.loadAutoencoderTest(data["autoencoder_test_file"])
         self.imgWidth=data["imageWidth"]
         self.imgHeight=data["imageHeight"]
         self.imgChannels=data["channels"]
@@ -78,24 +82,42 @@ class dataReader():
                 data=i.split(',')
                 self.train_depth.append(data[0])
                 self.train_rgb.append(data[1][:-1]) # exclude the final \n
-
+    def loadAutoencoderTrain(self,train_f):
+        with open(train_f,'r') as fh:
+            for i in fh:
+                data=i.split(',')
+                self.autoencoder_train_input.append(data[0])
+                self.autoencoder_train_output.append(data[1][:-1]) # exclude the final \n
+                
     def loadTest(self,test_f):
         with open(test_f,'r') as fh :
             for i in fh:
                 data=i.split(',')
                 self.test_depth.append(data[0])
                 self.test_rgb.append(data[1][:-1]) # exclude the final \n
-                
-    def loadImages(self,imgs,colorConversion, corruption):
+    
+    def loadAutoencoderTest(self,test_f):
+        with open(test_f,'r') as fh :
+            for i in fh:
+                data=i.split(',')
+                self.autoencoder_test_input.append(data[0])
+                self.autoencoder_test_output.append(data[1][:-1]) # exclude the final \n
+
+    def loadImages(self,imgs):
         img_list=[]
         for i in imgs:
             img=cv2.imread(i)
-            if corruption == True :
-                img = random_noise(img/255.0,mode='s&p',amount= self.corruptionLevel)
-                img = np.uint8(img*255.)     
-            if colorConversion:
-                img=cv2.cvtColor(img,self.colorSpace)
-            img=cv2.resize(img,(self.imgWidth,self.imgHeight))
+#             img=cv2.resize(img,(self.imgWidth,self.imgHeight))     
+#             if colorConversion:
+#                 img=cv2.cvtColor(img,self.colorSpace)
+#             if corruption == True :
+#                 #t1 = time.time()
+#                 img = self.salt_pepper(img/255.)
+#                 #img = random_noise(img/255.0,mode='s&p',amount= self.corruptionLevel)
+#                 #print (time.time() - t1 )
+#                 #s
+#                 img = np.uint8(img*255.)
+            
             if not img is None:
                 img_list.append(img)
             else: 
@@ -116,7 +138,7 @@ class dataReader():
         return img_list
         
     def nextTrainBatch(self,corruptionFlag):
-        print (self.train_rgb[self.start:self.end])
+        #print (self.train_rgb[self.start:self.end])
         inp=self.train_depth[self.start:self.end]
         gt=self.train_rgb[self.start:self.end]
         inp=self.loadImages(inp,False, False)
@@ -131,11 +153,14 @@ class dataReader():
             self.train_depth,self.train_rgb=shuffle(self.train_depth,self.train_rgb)
         return (inp,gt)
     
-    def nextAutoencoderTrainBatch(self,corruptionFlag):
-        inp=self.train_rgb[self.start:self.end]
-        gt=self.train_rgb[self.start:self.end]
-        inp=self.loadImages(inp,True, corruptionFlag)
-        gt=self.loadImages(gt,True,False)
+    def nextAutoencoderTrainBatch(self):
+        
+        inp=self.autoencoder_train_input[self.start:self.end]
+        gt=self.autoencoder_train_output[self.start:self.end]
+        
+        inp=self.loadImages(inp)
+        gt=self.loadImages(gt)
+       
         self.start=self.end
         self.end+=self.batchSize
         if self.end >= len(self.train_depth):
@@ -143,7 +168,7 @@ class dataReader():
             print("************** Training data : EPOCH {} COMPLETED************\n\n".format(self.epoch))
             self.start=0
             self.end=self.batchSize
-            self.train_depth,self.train_rgb=shuffle(self.train_depth,self.train_rgb)
+            self.autoencoder_train_input,self.autoencoder_train_output=shuffle(self.autoencoder_train_input,self.autoencoder_train_output)    
         return (inp,gt)
     
     def resetTrainBatch(self):
@@ -173,12 +198,29 @@ class dataReader():
             self.test_end=self.batchSize
             self.test_depth,self.test_rgb = shuffle(self.test_depth,self.test_rgb)
         return (inp,gt)
+    def salt_pepper (self,image):
+        row,col,ch = image.shape
+        s_vs_p = 0.5
+        amount = self.corruptionLevel
+        out = np.copy(image)
+        # Salt mode
+        num_salt = np.ceil(amount * image.size * s_vs_p)
+        coords = [np.random.randint(0, i - 1, int(num_salt))
+              for i in image.shape]
+        out[coords] = 1
+
+        # Pepper mode
+        num_pepper = np.ceil(amount* image.size * (1. - s_vs_p))
+        coords = [np.random.randint(0, i - 1, int(num_pepper))
+              for i in image.shape]
+        out[coords] = 0
+        return out
     
-    def nextAutoencoderTestBatch(self,corruptionFlag):
-        inp=self.test_rgb[self.test_start:self.test_end]
-        gt=self.test_rgb[self.test_start:self.test_end]
-        inp=self.loadImages(inp,True,corruptionFlag)
-        gt=self.loadImages(gt,True,False)
+    def nextAutoencoderTestBatch(self):
+        inp=self.autoencoder_test_input[self.test_start:self.test_end]
+        gt=self.autoencoder_test_output[self.test_start:self.test_end]
+        inp=self.loadImages(inp)
+        gt=self.loadImages(gt)
         self.test_start=self.test_end
         self.test_end+=self.batchSize
         if self.test_end >= len(self.test_depth):
@@ -186,7 +228,7 @@ class dataReader():
             print("*************Testing data : EPOCH {} COMPLETED ************ \n\n".format(self.test_epoch))
             self.test_start=0
             self.test_end=self.batchSize
-            self.test_depth,self.test_rgb = shuffle(self.test_depth,self.test_rgb)
+            self.autoencoder_test_input,self.autoencoder_test_output = shuffle(self.autoencoder_test_input,self.autoencoder_test_output)    
         return (inp,gt)
     
     def vizRandom(self): #Randomly visualize data in training and testing datasets
@@ -210,20 +252,57 @@ class dataReader():
         ax[1][1].imshow(test_out)
 
 
-# In[26]:
+# In[16]:
 
 
+import time
 if __name__ == '__main__':
-    data = {"scale":1,"batchSize":4,"train_file" : "/home/kgunase3/data/NYUD/RAW/train.txt",
-            "test_file" : '/home/kgunase3/data/NYUD/RAW/test.txt', "colorSpace":"RGB", 
-            "imageWidth" : 640,"imageHeight" :480, "channels":3,"corruptionLevel" : 0.25}
+    data = {"scale":1,"batchSize":24,"train_file" : "/home/kgunase3/data/NYUD/RAW/train.txt",
+            "test_file" : '/home/kgunase3/data/NYUD/RAW/test.txt',"autoencoder_train_file" : "/home/kgunase3/data/NYUD/RAW/Autoencoder_train.txt",  
+             "autoencoder_test_file" : "/home/kgunase3/data/NYUD/RAW/Autoencoder_test.txt", "colorSpace":"YUV", 
+            "imageWidth" : 640,"imageHeight" :480, "channels":3,"corruptionLevel" : 0.2}
     dataObj = dataReader(data)
-    inp,gt = dataObj.nextAutoencoderTestBatch(corruptionFlag = True)
-    print (gt1.shape)
+    t1 = time.time()
+    inp,gt = dataObj.nextAutoencoderTrainBatch(corruptionFlag = True)
+    print ("Time ",time.time() - t1)
+    #inp,gt = dataObj.nextTestBatch(corruptionFlag = True)
+    #inp1,gt1 = dataObj.nextTrainBatch(corruptionFlag= True)
+    #print (gt1.shape)
 
-    ind= 0
+    ind= 1
     import matplotlib.pyplot as plt
     plt.imshow(np.uint8(inp[ind]))
     plt.figure()
     plt.imshow(np.uint8(gt[ind]))
     
+
+
+# In[ ]:
+
+
+
+
+
+# In[ ]:
+
+
+
+
+
+# In[ ]:
+
+
+
+
+
+# In[ ]:
+
+
+
+
+
+# In[ ]:
+
+
+
+
