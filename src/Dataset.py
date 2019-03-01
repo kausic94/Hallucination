@@ -11,7 +11,7 @@ from sklearn.utils import shuffle
 from skimage.util import random_noise
 
 
-# In[12]:
+# In[26]:
 
 
 class dataReader():
@@ -137,12 +137,12 @@ class dataReader():
         img_list=np.float32(img_list.reshape(-1,self.imgHeight,self.imgWidth,self.imgChannels))
         return img_list
         
-    def nextTrainBatch(self,corruptionFlag):
+    def nextTrainBatch(self):
         #print (self.train_rgb[self.start:self.end])
         inp=self.train_depth[self.start:self.end]
         gt=self.train_rgb[self.start:self.end]
-        inp=self.loadImages(inp,False, False)
-        gt=self.loadImages(gt,True,corruptionFlag)
+        inp=self.loadImages(inp)
+        gt=self.loadImages(gt)
         self.start=self.end
         self.end+=self.batchSize
         if self.end >= len(self.train_depth):
@@ -183,12 +183,11 @@ class dataReader():
         self.test_end=self.batchSize
         print ("Test batch handlers reset")
         
-    def nextTestBatch(self,corruptionFlag):
-        print (self.test_rgb[self.test_start:self.test_end])
+    def nextTestBatch(self):
         inp=self.test_depth[self.test_start:self.test_end]
         gt=self.test_rgb[self.test_start:self.test_end]
-        inp=self.loadImages(inp,False,False)
-        gt=self.loadImages(gt,True,corruptionFlag)
+        inp=self.loadImages(inp)
+        gt=self.loadImages(gt)
         self.test_start=self.test_end
         self.test_end+=self.batchSize
         if self.test_end >= len(self.test_depth):
@@ -252,24 +251,24 @@ class dataReader():
         ax[1][1].imshow(test_out)
 
 
-# In[16]:
+# In[27]:
 
 
 import time
 if __name__ == '__main__':
-    data = {"scale":1,"batchSize":24,"train_file" : "/home/kgunase3/data/NYUD/RAW/train.txt",
-            "test_file" : '/home/kgunase3/data/NYUD/RAW/test.txt',"autoencoder_train_file" : "/home/kgunase3/data/NYUD/RAW/Autoencoder_train.txt",  
+    data = {"scale":1,"batchSize":24,"train_file" : "/home/kgunase3/data/NYUD/RAW/YUV_train.txt",
+            "test_file" : '/home/kgunase3/data/NYUD/RAW/YUV_test.txt',"autoencoder_train_file" : "/home/kgunase3/data/NYUD/RAW/Autoencoder_train.txt",  
              "autoencoder_test_file" : "/home/kgunase3/data/NYUD/RAW/Autoencoder_test.txt", "colorSpace":"YUV", 
             "imageWidth" : 640,"imageHeight" :480, "channels":3,"corruptionLevel" : 0.2}
     dataObj = dataReader(data)
     t1 = time.time()
-    inp,gt = dataObj.nextAutoencoderTrainBatch(corruptionFlag = True)
+    inp,gt = dataObj.nextTestBatch()
     print ("Time ",time.time() - t1)
     #inp,gt = dataObj.nextTestBatch(corruptionFlag = True)
     #inp1,gt1 = dataObj.nextTrainBatch(corruptionFlag= True)
     #print (gt1.shape)
 
-    ind= 1
+    ind= 0
     import matplotlib.pyplot as plt
     plt.imshow(np.uint8(inp[ind]))
     plt.figure()
