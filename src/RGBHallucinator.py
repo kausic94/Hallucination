@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[ ]:
+# In[1]:
 
 
 import numpy as np
@@ -20,7 +20,7 @@ from linknet import *
 import matplotlib.pyplot as plt
 
 
-# In[ ]:
+# In[12]:
 
 
 class Hallucinator ():    
@@ -70,10 +70,12 @@ class Hallucinator ():
         self.channels=int (config.get('DATA','channels'))
         self.train_file = config.get ('DATA','train_file')
         self.test_file  = config.get ('DATA','test_file')
+        autoencoder_train_file = config.get('DATA','autoencoder_train_file')
+        autoencoder_test_file  = config.get('DATA','autoencoder_test_file')
         self.batchSize  = int(config.get ('DATA','batchSize'))
         self.colorLossType= config.get('DATA','colorLossType')
         self.corruptionLevel =float(config.get('DATA','corruptionLevel'))
-        self.dataArguments = {"imageWidth":self.imageWidth,"imageHeight":self.imageHeight,"channels" : self.channels, "batchSize":self.batchSize,"train_file":self.train_file,"test_file":self.test_file,"scale":self.scale,"colorSpace":self.colorLossType,"corruptionLevel":self.corruptionLevel}    
+        self.dataArguments = {"imageWidth":self.imageWidth,"imageHeight":self.imageHeight,"channels" : self.channels, "batchSize":self.batchSize,"train_file":self.train_file,"test_file":self.test_file,"scale":self.scale,"colorSpace":self.colorLossType,"corruptionLevel":self.corruptionLevel,"autoencoder_train_file": autoencoder_train_file,"autoencoder_test_file": autoencoder_test_file}    
         self.maxEpoch=int(config.get('TRAIN','maxEpoch'))
         self.generatorLearningRate = float(config.get('TRAIN','generatorLearningRate'))
         self.teacherLearningRate =  float (config.get('TRAIN','teacherLearningRate'))
@@ -225,16 +227,7 @@ class Hallucinator ():
             update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS,scope = self.generatorScope) 
             learningRate = self.generatorLearningRate
             corruptionFlag = False
-        
-#         elif trainModel == 'pretrain_1':
-#             print ("Training layer1 of teacher")
-#             self.outH = self.layerWise1()
-#             loss = self.autoEncoderLoss()
-#             variables = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES,scope = "preTrain_1")
-#             update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS,scope = "preTrain_1")
-#             learningRate  = self.teacherLearningRate
-#             corruptionFlag = True
-        
+    
         else :
             print ("Invalid model choice")
             return None
@@ -255,21 +248,28 @@ class Hallucinator ():
         self.sess.run(tf.global_variables_initializer())
         process = psutil.Process(os.getpid())
         self.dataObj.resetTrainBatch()
+        self.dataObj.resetTestBatch()
+        if trainModel == 'TEACHER':
+            dataGrabber = self.dataObj.nextAutoencoderTrainBatch
+            dataGrabberTest = self.dataObj.nextAutoencoderTestBatch
+        if trainModel == 'GENERATOR':
+            dataGrabber = self.dataObj.nextTrainBatch
+            dataGrabberTest = self.dataObj.nextTestBatch
         while not self.dataObj.epoch == self.maxEpoch :
-            #iters+=1
-            inp,gt = self.dataObj.nextTrainBatch(corruptionFlag=corruptionFlag)
             t1=time.time()
-            if trainModel == 'TEACHER' or trainModel == 'pretrain_1' :
-                _,lval,t_summaries= self.sess.run([Trainables,loss,loss_summary], feed_dict= {self.inputs : gt,self.phase : True,self.drop_prob : self.dropout_probability})
-            if trainModel == 'GENERATOR':
-                _,lval,t_summaries= self.sess.run([Trainables,loss,loss_summary], feed_dict= {self.inputs : inp,self.phase : True ,self.output : gt})
-            #_,lval,t_summaries = self.sess.run([Trainables,loss,loss_summary], feed_dict= {self.inputs : inp,self.phase : True ,self.output : gt})
-            train_summary_writer.add_summary(t_summaries,iters)
+            inp,gt =dataGrabber()
+#             import matplotlib.pyplot as plt 
+#             plt.imshow(np.uint8(inp[0]))
+#             plt.figure()
+#             plt.imshow(np.uint8(gt[0]))
+#             s
+            _,lval,t_summaries= self.sess.run([Trainables,loss,loss_summary], feed_dict= {self.inputs : inp,self.output : gt,self.phase : True,self.drop_prob : self.dropout_probability})        
             t2=time.time()      
             if not iters % self.print_freq:
                 info = "Model Hallucinator_s{} Epoch  {} : Iteration : {}/{} loss value : {:0.4f} \n".format(self.scale,self.dataObj.epoch,iters,(self.maxEpoch)*int(self.dataObj.dataLength/self.dataObj.batchSize),lval) +"Memory used : {:0.4f} GB Time per batch : {:0.3f}s Model : {} \n".format(process.memory_info().rss/100000000.,t2-t1,self.modelName) 
                 print (info)   
                 self.logger.write(info)
+                train_summary_writer.add_summary(t_summaries,iters)
                 
             if not iters % self.save_freq:
                 info="Model Saved at iteration {}\n".format(iters)
@@ -277,12 +277,14 @@ class Hallucinator ():
                 self.logger.write(info)
                 self.saveModel(iters,trainModel)
                 
-            if not iters % self.val_freq :
-                val_inp,val_gt  = self.dataObj.nextTestBatch(corruptionFlag=False)
-                if trainModel == "TEACHER" or  trainModel == "pretrain_1":
-                    val_loss,v_summaries,v_img_summaries = self.sess.run([loss,loss_summary,valid_image_summary],feed_dict={self.inputs : val_gt,self.phase:False,self.drop_prob : 1.0})
-                if trainModel == "GENERATOR":
-                    val_loss,v_summaries,v_img_summaries = self.sess.run([loss,loss_summary,valid_image_summary],feed_dict={self.inputs :val_inp ,self.output: val_gt,self.phase:False})
+            if not iters % self.val_freq :           
+                val_inp,val_gt  = dataGrabberTest()
+#                 import matplotlib.pyplot as plt 
+#                 plt.imshow(np.uint8(val_inp[0]))
+#                 plt.figure()
+#                 plt.imshow(np.uint8(val_gt[0]))
+#                 s
+                val_loss,v_summaries,v_img_summaries = self.sess.run([loss,loss_summary,valid_image_summary],feed_dict={self.inputs : val_inp,self.output : val_gt,self.phase:False,self.drop_prob : 1.0})  
                 test_summary_writer.add_summary(v_summaries, iters)
                 test_summary_writer.add_summary(v_img_summaries,iters)
                 info = "Validation Loss at iteration{} : {}\n".format(iters, val_loss)
@@ -347,7 +349,7 @@ class Hallucinator ():
         return tf.sqrt(tf.losses.mean_squared_error(self.output,self.outH))  
     
     def autoEncoderLoss(self):
-        return tf.sqrt(tf.losses.mean_squared_error(self.inputs,self.outH))  
+        return tf.sqrt(tf.losses.mean_squared_error(self.output,self.outH))  
     
     def smoothing_loss(self):
         I_Hgrad    = tf.image.sobel_edges(self.outH)
@@ -451,7 +453,3 @@ class Hallucinator ():
         
             return  logits
     
-        
-    
-    
-
