@@ -20,7 +20,7 @@ def conv_bn_relu(x, num_channel, kernel_size, stride,
 
 @add_arg_scope
 def basic_block(x, num_channel, kernel_size,
-                stride, is_training, scope, drop_prob,padding='same'):
+                stride, is_training, scope,padding='same'):
     # Shortcut connection
     in_channel = x.get_shape().as_list()[-1]
     with tf.variable_scope(scope):
@@ -45,7 +45,7 @@ def basic_block(x, num_channel, kernel_size,
         x = conv_bn_relu(x, num_channel, kernel_size, stride,
                          is_training=is_training, scope='conv_bn_relu',
                          padding=padding)
-        x = tf.nn.dropout(x,keep_prob = drop_prob)
+        #x = tf.nn.dropout(x,keep_prob = drop_prob)
         x = tf.layers.conv2d(x, num_channel, [kernel_size, kernel_size],
                              strides=1, padding=padding, name='conv2',
                              use_bias=False, kernel_initializer=he_normal())
@@ -54,24 +54,24 @@ def basic_block(x, num_channel, kernel_size,
         # Considering add relu to x before addition
         x = x + shortcut
         x = tf.nn.relu(x)
-        x= tf.nn.dropout(x,keep_prob = drop_prob)
+        #x= tf.nn.dropout(x,keep_prob = drop_prob)
     return x
 
 
 @add_arg_scope
-def encoder_block(x, num_channel, kernel_size, stride, is_training, scope,drop_prob,
+def encoder_block(x, num_channel, kernel_size, stride, is_training, scope,
                  padding='same'):
     with tf.variable_scope(scope):
         x = basic_block(x, num_channel, kernel_size, stride, is_training,
-                        scope='bb1', drop_prob=drop_prob,padding=padding)
+                        scope='bb1',padding=padding)
         x = basic_block(x, num_channel, kernel_size, 1, is_training,
-                        scope='bb2', drop_prob=drop_prob,padding=padding)
+                        scope='bb2',padding=padding)
     return x
 
 
 @add_arg_scope
 def upconv_bn_relu(x, num_channel, kernel_size, stride, is_training,
-                   scope, drop_prob,padding='same', use_bias=False):
+                   scope,padding='same', use_bias=False):
     with tf.variable_scope(scope):
         x = tf.layers.conv2d_transpose(x, num_channel, [kernel_size, kernel_size],
                                       stride, activation=None,
@@ -81,31 +81,28 @@ def upconv_bn_relu(x, num_channel, kernel_size, stride, is_training,
             x, momentum=0.9, training=is_training, name='bn'
         )
         x = tf.nn.relu(x, name='relu')
-        x = tf.nn.dropout(x,keep_prob = drop_prob)
+        #x = tf.nn.dropout(x,keep_prob = drop_prob)
     return x
 
 
 @add_arg_scope
-def decoder_block(x, num_channel_m, num_channel_n, kernel_size,drop_prob,
+def decoder_block(x, num_channel_m, num_channel_n, kernel_size,
                   stride=1, is_training=True, scope=None, padding='same'):
     with tf.variable_scope(scope):
         x = upconv_bn_relu(x, num_channel_m // 4, 1, 1,
                            is_training=is_training,
-                           scope='conv_transpose_bn_relu1',drop_prob = drop_prob,
-                           padding=padding)
+                           scope='conv_transpose_bn_relu1',padding=padding)
         x = upconv_bn_relu(x, num_channel_m // 4, kernel_size, stride,
                            is_training=is_training,
-                           scope='conv_transpose_bn_relu2',drop_prob = drop_prob,
-                           padding=padding)
+                           scope='conv_transpose_bn_relu2',padding=padding)
         x = upconv_bn_relu(x, num_channel_n, 1, 1,
                            is_training=is_training,
-                           scope='conv_transpose_bn_relu3', drop_prob = drop_prob,
-                           padding=padding)
+                           scope='conv_transpose_bn_relu3',padding=padding)
     return x
 
 
 @add_arg_scope
-def initial_block(x, drop_prob,is_training=True, scope='initial_block',
+def initial_block(x, is_training=True, scope='initial_block',
                   padding='same', use_bias=False):
     with tf.variable_scope(scope):
         x = tf.layers.conv2d(x, 64, [7, 7], strides=2, activation=None,
@@ -115,13 +112,13 @@ def initial_block(x, drop_prob,is_training=True, scope='initial_block',
             x, momentum=0.9, training=is_training, name='bn1'
         )
         x = tf.nn.relu(x, name='relu')
-        x = tf.nn.dropout(x,keep_prob = drop_prob)
+        #x = tf.nn.dropout(x,keep_prob = drop_prob)
         x = tf.layers.max_pooling2d(x, [3, 3], strides=2, name='maxpool',
                                     padding=padding)
     return x
 
 
-def linknet(inputs, num_classes,drop_prob, reuse=None, is_training=True,
+def linknet(inputs, num_classes, reuse=None, is_training=True,
             scope='linknet'):
 
     filters = [64, 128, 256, 512]
@@ -132,10 +129,10 @@ def linknet(inputs, num_classes,drop_prob, reuse=None, is_training=True,
 
             # Encoder
             eb0 = initial_block(inputs, is_training=is_training,
-                                scope='initial_block',drop_prob = drop_prob)
+                                scope='initial_block')
             endpoint ['init'] = eb0
             eb1 = encoder_block(eb0, filters[0], 3, 1, is_training,
-                                scope='eb1', padding='same',drop_prob = drop_prob)
+                                scope='eb1', padding='same')
             endpoint ['encoder1'] = eb1
             ebi = eb1
             
@@ -144,24 +141,24 @@ def linknet(inputs, num_classes,drop_prob, reuse=None, is_training=True,
             
             for filter_i in filters[1:]:
                 ebi = encoder_block(ebi, filter_i, 3, 2, is_training,
-                                scope='eb'+str(i), padding='same',drop_prob = drop_prob)
+                                scope='eb'+str(i), padding='same')
                 endpoint['encoder'+str(i)] = ebi
                 ebs.append(ebi)
                 i = i + 1
             net = ebi
 
             # Decoder
-            dbi = decoder_block(net, filters_m[0], filters_n[0], 3,drop_prob = drop_prob,stride = 2, is_training=is_training, scope='db4',padding='same',)
+            dbi = decoder_block(net, filters_m[0], filters_n[0], 3,stride = 2, is_training=is_training, scope='db4',padding='same',)
             
             i = len(filters_m) - 1
             for filters_i in zip(filters_m[1:-1], filters_n[1:-1]):
                 dbi = dbi + ebs[i-1]
                 endpoint['decoder'+str(i+1)] = dbi
-                dbi = decoder_block(dbi, filters_i[0], filters_i[1], 3, drop_prob = drop_prob , stride = 2, is_training=is_training,scope='db'+str(i), padding='same')
+                dbi = decoder_block(dbi, filters_i[0], filters_i[1], 3, stride = 2, is_training=is_training,scope='db'+str(i), padding='same')
                 i = i - 1
             dbi = dbi + ebs[0]
             endpoint['decoder'+str(i+1)]=dbi
-            dbi = decoder_block(dbi, filters_m[-1], filters_n[-1], 3,drop_prob = drop_prob, stride = 1,
+            dbi = decoder_block(dbi, filters_m[-1], filters_n[-1], 3, stride = 1,
                                 is_training=is_training,
                                 scope='db1', padding='same')
             endpoint['decoder1'] = dbi
@@ -170,7 +167,7 @@ def linknet(inputs, num_classes,drop_prob, reuse=None, is_training=True,
             # Classification
             with tf.variable_scope('classifier', reuse=reuse):
                 net = upconv_bn_relu(net, 32, 3, 2, is_training=is_training,
-                                     scope='conv_transpose',drop_prob =drop_prob)
+                                     scope='conv_transpose')
                 net = conv_bn_relu(net, 32, 3, 1, is_training=is_training,
                                    scope='conv')
                 # Last layer, no batch normalization or activation

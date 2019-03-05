@@ -20,7 +20,7 @@ from linknet import *
 import matplotlib.pyplot as plt
 
 
-# In[12]:
+# In[6]:
 
 
 class Hallucinator ():    
@@ -32,7 +32,6 @@ class Hallucinator ():
         self.readConfiguration(config_file)
         self.inputs=tf.placeholder(tf.float32,(None,self.imageHeight,self.imageWidth,self.channels),name='Input')             
         self.phase=tf.placeholder(tf.bool,name = "phase")
-        self.drop_prob = tf.placeholder (tf.float32,name= "dropout_probability")
         self.output  =tf.placeholder(tf.float32,(None,self.imageHeight,self.imageWidth,self.channels),name='grountTruth')
         self.dataObj = Dataset.dataReader(self.dataArguments)
         self.filters = [64, 128, 256, 512]
@@ -211,22 +210,27 @@ class Hallucinator ():
         if trainModel == 'TEACHER':
             print ("The teacher is being trained right now ")
             with tf.variable_scope(self.teacherScope):
-                self.outH,self.teacherEndpoints = linknet(self.inputs,num_classes =3,reuse = None,is_training = self.phase,drop_prob =self.drop_prob)
+                self.outH,self.teacherEndpoints = linknet(self.inputs,num_classes =3,reuse = None,is_training = self.phase)
             loss= self.autoEncoderLoss()
             variables = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES,scope = self.teacherScope) 
             update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS,scope = self.teacherScope)
             learningRate = self.teacherLearningRate
-            corruptionFlag = True
+            dataGrabber = self.dataObj.nextAutoencoderTrainBatch
+            dataGrabberTest = self.dataObj.nextAutoencoderTestBatch
+            
             
         elif trainModel == 'GENERATOR':
             print ("The Generator model is being trained right now")
+            #self.restoreModel("TEACHER")
+            #outH2 = self.outH
             with tf.variable_scope(self.generatorScope):
-                self.outH,self.generatorEndpoints = linknet(self.inputs,num_classes =3,reuse = None,is_training = self.phase,drop_prob =self.drop_prob)#linkNet.build_model()
+                self.outH,self.generatorEndpoints = linknet(self.inputs,num_classes =3,reuse = None,is_training = self.phase)#linkNet.build_model()
             loss = self.loss()
             variables  = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES,scope = self.generatorScope)
             update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS,scope = self.generatorScope) 
             learningRate = self.generatorLearningRate
-            corruptionFlag = False
+            dataGrabber = self.dataObj.nextTrainBatch
+            dataGrabberTest = self.dataObj.nextTestBatch
     
         else :
             print ("Invalid model choice")
@@ -249,12 +253,10 @@ class Hallucinator ():
         process = psutil.Process(os.getpid())
         self.dataObj.resetTrainBatch()
         self.dataObj.resetTestBatch()
-        if trainModel == 'TEACHER':
-            dataGrabber = self.dataObj.nextAutoencoderTrainBatch
-            dataGrabberTest = self.dataObj.nextAutoencoderTestBatch
-        if trainModel == 'GENERATOR':
-            dataGrabber = self.dataObj.nextTrainBatch
-            dataGrabberTest = self.dataObj.nextTestBatch
+        
+            
+        
+            
         while not self.dataObj.epoch == self.maxEpoch :
             t1=time.time()
             inp,gt =dataGrabber()
@@ -263,7 +265,10 @@ class Hallucinator ():
 #             plt.figure()
 #             plt.imshow(np.uint8(gt[0]))
 #             s
-            _,lval,t_summaries= self.sess.run([Trainables,loss,loss_summary], feed_dict= {self.inputs : inp,self.output : gt,self.phase : True,self.drop_prob : self.dropout_probability})        
+            _,lval,t_summaries= self.sess.run([Trainables,loss,loss_summary], feed_dict= {self.inputs : inp,self.output : gt,self.phase : True})        
+#             import matplotlib.pyplot as plt 
+#             plt.imshow(np.uint8(output_tmp[0]))
+#             s
             t2=time.time()      
             if not iters % self.print_freq:
                 info = "Model Hallucinator_s{} Epoch  {} : Iteration : {}/{} loss value : {:0.4f} \n".format(self.scale,self.dataObj.epoch,iters,(self.maxEpoch)*int(self.dataObj.dataLength/self.dataObj.batchSize),lval) +"Memory used : {:0.4f} GB Time per batch : {:0.3f}s Model : {} \n".format(process.memory_info().rss/100000000.,t2-t1,self.modelName) 
@@ -279,12 +284,14 @@ class Hallucinator ():
                 
             if not iters % self.val_freq :           
                 val_inp,val_gt  = dataGrabberTest()
+                if trainModel == "TEACHER":
+                    val_inp = np.copy(val_gt)
 #                 import matplotlib.pyplot as plt 
 #                 plt.imshow(np.uint8(val_inp[0]))
 #                 plt.figure()
 #                 plt.imshow(np.uint8(val_gt[0]))
 #                 s
-                val_loss,v_summaries,v_img_summaries = self.sess.run([loss,loss_summary,valid_image_summary],feed_dict={self.inputs : val_inp,self.output : val_gt,self.phase:False,self.drop_prob : 1.0})  
+                val_loss,v_summaries,v_img_summaries = self.sess.run([loss,loss_summary,valid_image_summary],feed_dict={self.inputs : val_inp,self.output : val_gt,self.phase:False})  
                 test_summary_writer.add_summary(v_summaries, iters)
                 test_summary_writer.add_summary(v_img_summaries,iters)
                 info = "Validation Loss at iteration{} : {}\n".format(iters, val_loss)
@@ -297,16 +304,11 @@ class Hallucinator ():
     
     def testAll(self,modelChoice ):
         self.dataObj.resetTestBatch()
-        self.inputs=tf.placeholder(tf.float32,(None,self.imageHeight,self.imageWidth,self.channels),name='depthInput')             
-        self.phase=tf.placeholder(tf.bool,name = "phase")
-        self.output  =tf.placeholder(tf.float32,(None,self.imageHeight,self.imageWidth,self.channels),name='grountTruth')
-        #self.restoreModel(modelChoice)
-        self.restoreModelAll()
+        self.restoreModel(modelChoice)
         loss=[]
-        if modelChoice == "TEACHER":
-            
+        if modelChoice == "TEACHER":    
             loss_func = self.autoEncoderLoss()
-            corruptionFlag =  False
+            dataGrabber = self.dataObj.nextAutoencoderTestBatch
         elif modelChoice == "GENERATOR" :
             loss_func = self.loss()
             corruptionFlag = False
@@ -315,11 +317,11 @@ class Hallucinator ():
             return None
         print ("Testing")
         while not self.dataObj.test_epoch == 1 :
-            x,y = self.dataObj.nextTestBatch(corruptionFlag=corruptionFlag)
+            x,y = dataGrabber()
             
             if modelChoice == 'TEACHER' :
                 print ("---------------------------------------")
-                lval= self.sess.run(loss_func, feed_dict= {self.inputs : y,self.phase : False})
+                lval= self.sess.run(loss_func, feed_dict= {self.inputs : y,self.output:y, self.phase : False})
             if modelChoice == 'GENERATOR':
                 lval= self.sess.run(loss_func, feed_dict= {self.inputs : x ,self.phase : False ,self.output : y})
             loss.append(lval)
@@ -327,9 +329,9 @@ class Hallucinator ():
         return np.mean(loss)
         
     def getHallucinatedImages(self,image_list):
-        self.restoreModel()
-        img_processed= self.dataObj.loadImages(image_list,False)
-        output = self.sess.run(self.outH,{self.inputs:img_processed,self.phase : False})
+        self.restoreModel("TEACHER")
+        img_processed= self.dataObj.loadImages(image_list)
+        output = self.sess.run(self.outH,{self.inputs:img_processed,self.phase : False,self.drop_prob:1.0})
         output = self.dataObj.postProcessImages(output)
         return output
     
@@ -343,64 +345,47 @@ class Hallucinator ():
         
     
     def loss (self) :
-        return self.lambda1*self.l2_loss() + self.lambda2*self.smoothing_loss() 
+        with tf.variable_scope("Final_loss"):
+            return self.lambda1*self.l2_loss() + self.lambda2*self.smoothing_loss() 
 
     def l2_loss(self):
-        return tf.sqrt(tf.losses.mean_squared_error(self.output,self.outH))  
+        with tf.variable_scope ("RMSE_loss"):
+            return tf.sqrt(tf.losses.mean_squared_error(self.output,self.outH))  
     
     def autoEncoderLoss(self):
-        return tf.sqrt(tf.losses.mean_squared_error(self.output,self.outH))  
+        with tf.variable_scope("Autoencoder_loss"):
+            return tf.sqrt(tf.losses.mean_squared_error(self.output,self.outH))  
+        
     
     def smoothing_loss(self):
-        I_Hgrad    = tf.image.sobel_edges(self.outH)
-        I_Hedge    = I_Hgrad[:,:,:,:,0] + I_Hgrad[:,:,:,:,1]
-        zeros      = tf.zeros_like(I_Hedge)
-        I_Hhuber   = tf.losses.huber_loss(I_Hedge,zeros,delta = self.huberDelta,reduction=tf.losses.Reduction.NONE)
-            
-        I_RGBgrad  = tf.image.sobel_edges(self.output)
-        I_RGBedge  = I_RGBgrad[:,:,:,:,0] + I_RGBgrad[:,:,:,:,1]
-        I_RGBhuber = tf.losses.huber_loss(I_RGBedge,zeros,delta = self.huberDelta, reduction=tf.losses.Reduction.NONE)
+        with tf.variable_scope ("smoothing_loss") :
+            I_Hgrad    = tf.image.sobel_edges(self.outH)
+            I_Hedge    = I_Hgrad[:,:,:,:,0] + I_Hgrad[:,:,:,:,1]
+            zeros      = tf.zeros_like(I_Hedge)
+            I_Hhuber   = tf.losses.huber_loss(I_Hedge,zeros,delta = self.huberDelta,reduction=tf.losses.Reduction.NONE)
 
-        edge_aware_weight   = tf.exp(-1*I_RGBhuber)
-        weighted_smooth_img = tf.multiply(I_Hhuber, edge_aware_weight)
-        loss_val = tf.reduce_mean(weighted_smooth_img) 
+            I_RGBgrad  = tf.image.sobel_edges(self.output)
+            I_RGBedge  = I_RGBgrad[:,:,:,:,0] + I_RGBgrad[:,:,:,:,1]
+            I_RGBhuber = tf.losses.huber_loss(I_RGBedge,zeros,delta = self.huberDelta, reduction=tf.losses.Reduction.NONE)
+
+            edge_aware_weight   = tf.exp(-1*I_RGBhuber)
+            weighted_smooth_img = tf.multiply(I_Hhuber, edge_aware_weight)
+            loss_val = tf.reduce_mean(weighted_smooth_img) 
         return loss_val
-   
+    def rmse (self,v1,v2,endPoint):
+        return tf.sqrt(tf.losses.mean_squared_error(self.teacherEndpoints[endPoint],self.generatorEndpoints[endPoint]))   
+                       
+    def featureSpaceLoss (self):
+        with tf.variable_scope("Featurespace_loss"):
+            feature_loss =            rmse("encode1") + rmse("encode2") + rmse("encode3") + rmse("encode4") +            rmse ("decode1") + rmse("decode2") + rmse("decode3") + rmse("decode4")
+        return feature_loss
+            
     def saveModel(self,iters,modelChoice):
         path = os.path.join(self.modelLocation,modelChoice)
         if not os.path.exists (path):
             os.makedirs(path)
         self.saver.save(self.sess,os.path.join(path,modelChoice+'_'+self.modelName),global_step = iters)
-        
-    def saveModelAll(self,iters):
-        path = self.modelLocation
-        if not os.path.exists(path):
-            os.makedirs(path)
-        self.saver.save(self.sess,os.path.join(path,self.modelName),global_step=iters)
-        
-    def restoreModelAll(self):
-        path = self.modelLocation
-        if self.checkPoint:
-            print ("Using the latest trained model in check point file")
-            self.restoreModelPath = tf.train.latest_checkpoint(path)
-            print (" Model at {} restored".format(self.restoreModelPath))
-        else : 
-            self.restoreModelPath = config.get('LOG','restoreModelPath')
-            self.restoreModelPath = self.restoreModelPath
-            
-        if not self.sess is None:
-            if self.sess._opened :
-                self.sess.close()
-        sess=tf.Session()
-        with tf.variable_scope(self.teacherScope):
-                self.outH,self.teacherEndpoints = linknet(self.inputs,3,None,self.phase)
-        with tf.variable_scope(self.generatorScope):
-                outH,self.generatorEndpoints = linknet(self.inputs,3,None,self.phase)
-            
-        saver=tf.train.Saver()
-        saver.restore(sess,self.restoreModelPath)
-        self.sess=sess
-                
+                    
     def restoreModel(self,modelChoice):
         path = os.path.join(self.modelLocation,modelChoice)
         if self.checkPoint:
@@ -418,7 +403,8 @@ class Hallucinator ():
         sess=tf.Session()
         if modelChoice == "TEACHER":
             print ("Restoring Teacher model")
-            self.outH = self.teacherModel
+            with tf.variable_scope(self.teacherScope):
+                self.outH,self.teacherEndpoints = linknet(self.inputs,num_classes =3,reuse = None,is_training = self.phase)
             variables = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES,scope = self.teacherScope) 
             update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS,scope = self.teacherScope)
         elif modelChoice == "GENERATOR":
@@ -453,3 +439,10 @@ class Hallucinator ():
         
             return  logits
     
+        
+
+
+
+
+
+
