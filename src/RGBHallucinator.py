@@ -20,7 +20,7 @@ from linknet import *
 import matplotlib.pyplot as plt
 
 
-# In[6]:
+# In[2]:
 
 
 class Hallucinator ():    
@@ -37,6 +37,7 @@ class Hallucinator ():
         self.filters = [64, 128, 256, 512]
         self.filters_m = [64, 128, 256, 512][::-1]
         self.filters_n = [64, 64, 128, 256][::-1]
+        self.continue_training = True
         if not os.path.exists(self.summary_writer_dir):
             os.makedirs(self.summary_writer_dir)
         if not os.path.exists(self.modelLocation):
@@ -84,7 +85,8 @@ class Hallucinator ():
         self.lambda3     = float(config.get('TRAIN','colorLoss_lambda'))
         self.model_choice = config.get('TRAIN','model')
         self.dropout_probability   = config.get('TRAIN', 'dropout')
-        
+        self.restore_name = config.get('LOG','restoreModelName')
+        self.restoreModelPath = config.get('LOG','restoreModelPath')
         
         if int(config.get('TRAIN','activation')) == 0:
             self.activation = tf.nn.relu
@@ -110,89 +112,6 @@ class Hallucinator ():
             return tf.layers.batch_normalization(feat, training = self.phase)
         if typeN == "INSTANCE":
             return tf.contrib.layers.instance_norm(feat)
-            
-
-    def generateImage(self):
-        with tf.variable_scope(self.modelName, reuse=tf.AUTO_REUSE):
-            mu,sigma=0,0.1
-            strides=[1,1,1,1]
-            #Layer 1 
-            w1=tf.Variable(tf.truncated_normal(shape=(11,11,3,147),mean=mu,stddev= sigma))
-            b1=tf.Variable(tf.zeros(147))
-            conv1=tf.nn.conv2d(self.inputs,w1,strides,padding='SAME')
-            conv1=tf.nn.bias_add(conv1,b1)
-            conv1=self.normalization(conv1,self.normType)
-            conv1=self.activation(conv1)
-            #chk1=tf.check_numerics(conv1,"conv1")
-            #Layer 2
-            w2=tf.Variable(tf.truncated_normal(shape=(11,11,147,36),mean=mu,stddev=sigma))
-            b2=tf.Variable(tf.zeros(36))
-            conv2=tf.nn.conv2d(conv1,w2,strides,padding='SAME')
-            conv2=tf.nn.bias_add(conv2,b2)
-            conv2=self.normalization(conv2,self.normType)
-            conv2=self.activation(conv2)
-            #Layer 3
-            w3=tf.Variable(tf.truncated_normal(shape=(11,11,36,36),mean=mu,stddev=sigma))
-            b3=tf.Variable(tf.zeros(36))
-            conv3=tf.nn.conv2d(conv2,w3,strides,padding='SAME')
-            conv3=tf.nn.bias_add(conv3,b3)
-            conv3=self.normalization(conv3,self.normType)
-            conv3=self.activation(conv3)
-            #Layer 4
-            w4=tf.Variable(tf.truncated_normal(shape=(11,11,36,36),mean=mu,stddev=sigma))
-            b4=tf.Variable(tf.zeros(36))
-            conv4=tf.nn.conv2d(conv3,w4,strides,padding='SAME')
-            conv4=tf.nn.bias_add(conv4,b4)
-            conv4=self.normalization(conv4,self.normType)
-            conv4=self.activation(conv4)
-            #Layer 5
-            w5=tf.Variable(tf.truncated_normal(shape=(11,11,36,36),mean=mu,stddev=sigma))
-            b5=tf.Variable(tf.zeros(36))
-            conv5=tf.nn.conv2d(conv4,w5,strides,padding='SAME')
-            conv5=tf.nn.bias_add(conv5,b5)
-            conv5=self.normalization(conv5,self.normType)
-            conv5=self.activation(conv5)
-            #Layer 6
-            w6=tf.Variable(tf.truncated_normal(shape=(11,11,36,36),mean=mu,stddev=sigma))
-            b6=tf.Variable(tf.zeros(36))
-            conv6=tf.nn.conv2d(conv5,w6,strides,padding='SAME')
-            conv6=tf.nn.bias_add(conv6,b6)
-            conv6=self.normalization(conv6,self.normType)
-            conv6=self.activation(conv6)
-            #Layer 7
-            w7=tf.Variable(tf.truncated_normal(shape=(11,11,36,36),mean=mu,stddev=sigma))
-            b7=tf.Variable(tf.zeros(36))
-            conv7 =tf.nn.conv2d(conv6,w7,strides,padding='SAME')
-            conv7=tf.nn.bias_add(conv7,b7)
-            conv7=self.normalization(conv7,self.normType)
-            conv7=self.activation(conv7)
-            #layer 8
-            w8=tf.Variable(tf.truncated_normal(shape=(11,11,36,36),mean=mu,stddev=sigma))
-            b8=tf.Variable(tf.zeros(36))
-            conv8 = tf.nn.conv2d(conv7,w8,strides,padding='SAME')
-            conv8 = tf.nn.bias_add(conv8,b8)
-            conv8 = self.normalization(conv8,self.normType)
-            conv8 = self.activation(conv8)
-            #layer 9
-            w9=tf.Variable(tf.truncated_normal(shape=(11,11,36,36),mean=mu,stddev=sigma))
-            b9=tf.Variable(tf.zeros(36))
-            conv9 = tf.nn.conv2d(conv8,w9,strides,padding='SAME')
-            conv9 = tf.nn.bias_add(conv9,b9)
-            conv9 = self.normalization(conv9,self.normType)
-            conv9 = self.activation(conv9)
-            #layer 10
-            w10=tf.Variable(tf.truncated_normal(shape=(11,11,36,147),mean=mu,stddev=sigma))
-            b10=tf.Variable(tf.zeros(147))
-            conv10 =tf.nn.conv2d(conv9,w10,strides,padding='SAME')
-            conv10 = tf.nn.bias_add(conv10,b10)
-            conv10 = self.normalization(conv10,self.normType)
-            conv10 = self.activation(conv10)
-            #layer 11
-            w11=tf.Variable(tf.truncated_normal(shape=(11,11,147,3),mean=mu,stddev=sigma))
-            b11=tf.Variable(tf.zeros(3))
-            conv11 = tf.nn.conv2d(conv10,w11,strides,padding='SAME')
-            conv11 = tf.nn.bias_add(conv11,b11,name="output")
-            return conv11
     
     def train(self,trainModel): 
         #tf.reset_default_graph()
@@ -209,11 +128,15 @@ class Hallucinator ():
         
         if trainModel == 'TEACHER':
             print ("The teacher is being trained right now ")
-            with tf.variable_scope(self.teacherScope):
-                self.outH,self.teacherEndpoints = linknet(self.inputs,num_classes =3,reuse = None,is_training = self.phase)
+            if self.continue_training :
+                self.restoreModel("TEACHER")
+            else :                
+                with tf.variable_scope(self.teacherScope):
+                    self.outH,self.teacherEndpoints = linknet(self.inputs,num_classes =3,reuse = None,is_training = self.phase)
+                self.variables = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES,scope = self.teacherScope) 
+                self.update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS,scope = self.teacherScope)
             loss= self.autoEncoderLoss()
-            variables = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES,scope = self.teacherScope) 
-            update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS,scope = self.teacherScope)
+            
             learningRate = self.teacherLearningRate
             dataGrabber = self.dataObj.nextAutoencoderTrainBatch
             dataGrabberTest = self.dataObj.nextAutoencoderTestBatch
@@ -223,11 +146,16 @@ class Hallucinator ():
             print ("The Generator model is being trained right now")
             #self.restoreModel("TEACHER")
             #outH2 = self.outH
-            with tf.variable_scope(self.generatorScope):
-                self.outH,self.generatorEndpoints = linknet(self.inputs,num_classes =3,reuse = None,is_training = self.phase)#linkNet.build_model()
+            if self.continue_training :
+                self.restoreModel("GENERATOR")
+                
+            else :
+                with tf.variable_scope(self.generatorScope):
+                    self.outH,self.generatorEndpoints = linknet(self.inputs,num_classes =3,reuse = None,is_training = self.phase)#linkNet.build_model()
+                self.variables  = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES,scope = self.generatorScope)
+                self.update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS,scope = self.generatorScope) 
+            
             loss = self.loss()
-            variables  = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES,scope = self.generatorScope)
-            update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS,scope = self.generatorScope) 
             learningRate = self.generatorLearningRate
             dataGrabber = self.dataObj.nextTrainBatch
             dataGrabberTest = self.dataObj.nextTestBatch
@@ -237,19 +165,21 @@ class Hallucinator ():
             return None
     
         optimizer=tf.train.AdamOptimizer(learning_rate=learningRate)
-        with tf.control_dependencies(update_ops): 
-            Trainables=optimizer.minimize(loss,var_list = variables)
+        with tf.control_dependencies(self.update_ops): 
+            Trainables=optimizer.minimize(loss,var_list = self.variables)
         valid_image_summary =tf.summary.image('test_image_output',self.outH)
         loss_summary = tf.summary.scalar('Loss',loss)
         iters=0
         
-        self.saver = tf.train.Saver(var_list = variables) 
+        self.saver = tf.train.Saver(var_list = self.variables) 
         config=tf.ConfigProto()
         config.gpu_options.allow_growth=True
         self.sess = tf.Session(config=config)
         train_summary_writer=tf.summary.FileWriter(os.path.join(self.summary_writer_dir,trainModel+'train'),self.sess.graph)
         test_summary_writer=tf.summary.FileWriter(os.path.join(self.summary_writer_dir,trainModel+'test'),self.sess.graph)
         self.sess.run(tf.global_variables_initializer())
+        if self.continue_training:
+            self.saver.restore(self.sess,self.restoreModelPath)
         process = psutil.Process(os.getpid())
         self.dataObj.resetTrainBatch()
         self.dataObj.resetTestBatch()
@@ -259,7 +189,7 @@ class Hallucinator ():
             
         while not self.dataObj.epoch == self.maxEpoch :
             t1=time.time()
-            inp,gt =dataGrabber()
+            inp,gt =dataGrabber(True)
 #             import matplotlib.pyplot as plt 
 #             plt.imshow(np.uint8(inp[0]))
 #             plt.figure()
@@ -329,21 +259,41 @@ class Hallucinator ():
         return np.mean(loss)
         
     def getHallucinatedImages(self,image_list):
-        self.restoreModel("TEACHER")
-        img_processed= self.dataObj.loadImages(image_list)
-        output = self.sess.run(self.outH,{self.inputs:img_processed,self.phase : False,self.drop_prob:1.0})
+        if self.sess is None:
+            self.restoreModel("GENERATOR")
+        img_processed= self.dataObj.loadImages(image_list,False)
+#         img_processed = cv2.imread(image_list[0],-1)
+#         img_processed = np.uint8((img_processed/np.max(img_processed))*255.)
+#         img_processed = cv2.resize(np.stack([img_processed,img_processed,img_processed],axis=-1),(640,480))
+#         plt.imshow(img_processed)
+#         img_processed = np.float32([img_processed])   
+#         img_processed = img_processed.reshape(-1,480,640,3)
+        output = self.sess.run(self.outH,{self.inputs:img_processed,self.phase : False})
         output = self.dataObj.postProcessImages(output)
         return output
     
     def getTeacherImages(self,image_list):
         self.restoreModel("TEACHER")
-        img_processed= self.dataObj.loadImages(image_list,True)
-        inp,gt = self.dataObj.nextTrainBatch()
-        output = self.sess.run(self.outH,{self.inputs:gt,self.phase : False})
+        img_processed= self.dataObj.loadImages(image_list)
+        #inp,gt = self.dataObj.nextTrainBatch()
+        output = self.sess.run(self.outH,{self.inputs:img_processed,self.phase : False})
         output = self.dataObj.postProcessImages(output)
-        return output,gt
+        return output
         
-    
+    def getReconstructedImage(self,image):
+        img = cv2.imread(image)
+        if img is None :
+            print ("Not valid image")
+            return None
+        #img = cv2.cvtColor(img,cv2.COLOR_BGR2YUV)
+        img = cv2.resize(img,(640,480))
+        img = self.dataObj.preProcessImages([img])
+        if self.sess is None :
+            self.restoreModel("BOTH")
+        output = self.sess.run(self.stage1,{self.inputs:img,self.phase : False})
+        output = self.sess.run(self.stage2,{self.inputs:output,self.phase : False})
+        return self.dataObj.postProcessImages(output)
+        
     def loss (self) :
         with tf.variable_scope("Final_loss"):
             return self.lambda1*self.l2_loss() + self.lambda2*self.smoothing_loss() 
@@ -393,8 +343,8 @@ class Hallucinator ():
             self.restoreModelPath = tf.train.latest_checkpoint(path)
             print (" Model at {} restored".format(self.restoreModelPath))
         else : 
-            self.restoreModelPath = config.get('LOG','restoreModelPath')
-            self.restoreModelPath = os.path.join(self.restoreModelPath,modelChoice)
+            
+            self.restoreModelPath = os.path.join(self.restoreModelPath,modelChoice,modelChoice+'_'+self.restore_name)
             
         if not self.sess is None:
             if self.sess._opened :
@@ -405,18 +355,39 @@ class Hallucinator ():
             print ("Restoring Teacher model")
             with tf.variable_scope(self.teacherScope):
                 self.outH,self.teacherEndpoints = linknet(self.inputs,num_classes =3,reuse = None,is_training = self.phase)
-            variables = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES,scope = self.teacherScope) 
-            update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS,scope = self.teacherScope)
+            self.variables = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES,scope = self.teacherScope) 
+            self.update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS,scope = self.teacherScope)
         elif modelChoice == "GENERATOR":
             print ("Restoring Generator model")
-            self.outH = self.model
-            variables =  tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES,scope = self.generatorScope)
+            with tf.variable_scope(self.generatorScope):
+                self.outH,self.generatorEndpoints = linknet(self.inputs,num_classes =3,reuse = None,is_training = self.phase)
+            self.variables =  tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES,scope = self.generatorScope)
+            self.update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS,scope = self.generatorScope)
+        
+        elif modelChoice == "BOTH":
+            print ("Restoring Generator and Teacher modelmodel")
+            with tf.variable_scope(self.generatorScope):
+                self.stage1,self.generatorEndpoints = linknet(self.inputs,num_classes =3,reuse = None,is_training = self.phase)
+                variables_gen =  tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES,scope = self.generatorScope)
+                update_ops_gen = tf.get_collection(tf.GraphKeys.UPDATE_OPS,scope = self.generatorScope)
+            with tf.variable_scope(self.teacherScope):
+                self.stage2,self.teacherEndpoints = linknet(self.inputs,num_classes =3,reuse = None,is_training = self.phase)
+                variables_teach = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES,scope = self.teacherScope) 
+                update_ops_teach = tf.get_collection(tf.GraphKeys.UPDATE_OPS,scope = self.teacherScope)
+            
         else :
             print ("INVALID MODEL CHOICE")
             return None
         
-        saver=tf.train.Saver(var_list = variables)
-        saver.restore(sess,self.restoreModelPath)
+        
+        if modelChoice == 'BOTH':
+            saver = tf.train.Saver(var_list=variables_gen)
+            saver.restore(sess,tf.train.latest_checkpoint(os.path.join(self.modelLocation,"GENERATOR")))
+            saver = tf.train.Saver(var_list=variables_teach)
+            saver.restore(sess,tf.train.latest_checkpoint(os.path.join(self.modelLocation,"TEACHER")))
+        else :
+            saver=tf.train.Saver(var_list = self.variables)
+            saver.restore(sess,self.restoreModelPath)
         self.sess=sess
         
         
@@ -440,9 +411,5 @@ class Hallucinator ():
             return  logits
     
         
-
-
-
-
 
 
