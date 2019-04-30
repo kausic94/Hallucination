@@ -18,6 +18,7 @@ import psutil
 #import  resnet18_linknet as ln
 from linknet import *
 import matplotlib.pyplot as plt
+from Architecture import architecture
 
 
 # In[2]:
@@ -37,7 +38,8 @@ class Hallucinator ():
         self.filters = [64, 128, 256, 512]
         self.filters_m = [64, 128, 256, 512][::-1]
         self.filters_n = [64, 64, 128, 256][::-1]
-        self.continue_training = True
+        self.model = architecture([[(3,3),(11,11)],[(5,5),(7,7)],[(9,9)]],[(3,3),(7,7),(11,11)])
+        self.continue_training = False
         if not os.path.exists(self.summary_writer_dir):
             os.makedirs(self.summary_writer_dir)
         if not os.path.exists(self.modelLocation):
@@ -151,7 +153,9 @@ class Hallucinator ():
                 
             else :
                 with tf.variable_scope(self.generatorScope):
-                    self.outH,self.generatorEndpoints = linknet(self.inputs,num_classes =3,reuse = None,is_training = self.phase)#linkNet.build_model()
+                    print("trying new architecture")
+                    #self.outH,self.generatorEndpoints = linknet(self.inputs,num_classes =3,reuse = None,is_training = self.phase)#linkNet.build_model()
+                    self.outH = self.model.buildNetwork_base4(self.inputs,self.phase,"Hallucinator")
                 self.variables  = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES,scope = self.generatorScope)
                 self.update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS,scope = self.generatorScope) 
             
@@ -189,7 +193,7 @@ class Hallucinator ():
             
         while not self.dataObj.epoch == self.maxEpoch :
             t1=time.time()
-            inp,gt =dataGrabber(True)
+            inp,gt =dataGrabber(False)
 #             import matplotlib.pyplot as plt 
 #             plt.imshow(np.uint8(inp[0]))
 #             plt.figure()
@@ -409,7 +413,3 @@ class Hallucinator ():
             logits = tf.layers.conv2d_transpose(net, 3 ,kernel_size=2, strides=2,padding='same',name='conv_transpose',kernel_initializer=he_normal())
         
             return  logits
-    
-        
-
-
