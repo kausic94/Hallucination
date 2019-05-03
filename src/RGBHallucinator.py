@@ -38,7 +38,6 @@ class Hallucinator ():
         self.filters = [64, 128, 256, 512]
         self.filters_m = [64, 128, 256, 512][::-1]
         self.filters_n = [64, 64, 128, 256][::-1]
-        self.model = architecture([[(3,3),(11,11)],[(5,5),(7,7)],[(9,9)]],[(3,3),(7,7),(11,11)])
         self.continue_training = False
         if not os.path.exists(self.summary_writer_dir):
             os.makedirs(self.summary_writer_dir)
@@ -53,15 +52,21 @@ class Hallucinator ():
         except :
             pass
         
-        os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu_num)
+        
         self.teacherScope = "Teacher"
         self.generatorScope = "Generator"
         self.sess = None
         with open(config_file) as fh :
             self.confInfo = fh.read()        
-                
+        self.generatorModel =None
         if self.model_choice == "APG" :
             self.model = self.generateImage()
+        elif self.model_choice == "linknet":
+            self.generatorModel = lambda inp: linknet(inp,num_classes =3,reuse = None,is_training = self.phase)
+        elif self.model_choice == "aggregated":
+            print ("Trying out new architecture")
+            arch= architecture([[(3,3),(11,11)],[(5,5),(7,7)],[(11,11),(9,9)]],[(3,3),(7,7),(11,11)])
+            self.generatorModel = lambda inp : arch.buildNetwork_base2(inp,self.phase,"Hallucinator")
             
     def readConfiguration(self,config_file):
         print ("Reading configuration File")
@@ -89,7 +94,7 @@ class Hallucinator ():
         self.dropout_probability   = config.get('TRAIN', 'dropout')
         self.restore_name = config.get('LOG','restoreModelName')
         self.restoreModelPath = config.get('LOG','restoreModelPath')
-        
+        self.num_gpus = int(config.get('TRAIN','num_gpus'))
         if int(config.get('TRAIN','activation')) == 0:
             self.activation = tf.nn.relu
             print("Relu activation has been chosen")
@@ -115,126 +120,132 @@ class Hallucinator ():
         if typeN == "INSTANCE":
             return tf.contrib.layers.instance_norm(feat)
     
+    def average_gradients(self,tower_grads):
+      """Calculate the average gradient for each shared variable across all towers.
+      Note that this function provides a synchronization point across all towers.
+      Args:
+        tower_grads: List of lists of (gradient, variable) tuples. The outer list
+          is over individual gradients. The inner list is over the gradient
+          calculation for each tower.
+      Returns:
+         List of pairs of (gradient, variable) where the gradient has been averaged
+         across all towers.
+      """
+      average_grads = []
+      for grad_and_vars in zip(*tower_grads):
+        # Note that each grad_and_vars looks like the following:
+        #   ((grad0_gpu0, var0_gpu0), ... , (grad0_gpuN, var0_gpuN))
+        grads = []
+        for g, _ in grad_and_vars:
+          # Add 0 dimension to the gradients to represent the tower.
+          expanded_g = tf.expand_dims(g, 0)
+
+          # Append on a 'tower' dimension which we will average over below.
+          grads.append(expanded_g)
+
+        # Average over the 'tower' dimension.
+        grad = tf.concat(axis=0, values=grads)
+        grad = tf.reduce_mean(grad, 0)
+
+        # Keep in mind that the Variables are redundant because they are shared
+        # across towers. So .. we will just return the first tower's pointer to
+        # the Variable.
+        v = grad_and_vars[0][1]
+        grad_and_var = (grad, v)
+        average_grads.append(grad_and_var)
+      return average_grads
+
+
     def train(self,trainModel): 
-        #tf.reset_default_graph()
-        
-        if os.path.isfile (self.logDir):
-            print ("This log file with same name exisits. Likely that the model file exists. If you want to cancel, cancel in the next 5 seconds")
-            time.sleep(5)
-            self.logger = open(self.logDir,'a')
-        else :
+        with tf.device ('/cpu:0'):
             self.logger = open(self.logDir,'w')
             self.logger.write(trainModel + " Training")
             self.logger.write("***********************")
             self.logger.write(self.confInfo +'\n\n\n')
-        
-        if trainModel == 'TEACHER':
-            print ("The teacher is being trained right now ")
-            if self.continue_training :
-                self.restoreModel("TEACHER")
-            else :                
-                with tf.variable_scope(self.teacherScope):
-                    self.outH,self.teacherEndpoints = linknet(self.inputs,num_classes =3,reuse = None,is_training = self.phase)
-                self.variables = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES,scope = self.teacherScope) 
-                self.update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS,scope = self.teacherScope)
-            loss= self.autoEncoderLoss()
-            
-            learningRate = self.teacherLearningRate
-            dataGrabber = self.dataObj.nextAutoencoderTrainBatch
-            dataGrabberTest = self.dataObj.nextAutoencoderTestBatch
-            
-            
-        elif trainModel == 'GENERATOR':
-            print ("The Generator model is being trained right now")
-            #self.restoreModel("TEACHER")
-            #outH2 = self.outH
-            if self.continue_training :
-                self.restoreModel("GENERATOR")
-                
+            self.dataObj.resetTrainBatch()
+            self.dataObj.resetTestBatch()
+            if trainModel == 'GENERATOR':
+                print ("The Generator model is being trained right now")
+                learningRate = self.generatorLearningRate
+                dataGrabber = self.dataObj.nextTrainBatch
+                dataGrabberTest = self.dataObj.nextTestBatch
+                scope = self.generatorScope
+                model = self.generatorModel
+                process = psutil.Process(os.getpid())
             else :
-                with tf.variable_scope(self.generatorScope):
-                    print("trying new architecture")
-                    #self.outH,self.generatorEndpoints = linknet(self.inputs,num_classes =3,reuse = None,is_training = self.phase)#linkNet.build_model()
-                    self.outH = self.model.buildNetwork_base4(self.inputs,self.phase,"Hallucinator")
-                self.variables  = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES,scope = self.generatorScope)
-                self.update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS,scope = self.generatorScope) 
+                print ("Invalid model choice")
+                return None
             
-            loss = self.loss()
-            learningRate = self.generatorLearningRate
-            dataGrabber = self.dataObj.nextTrainBatch
-            dataGrabberTest = self.dataObj.nextTestBatch
-    
-        else :
-            print ("Invalid model choice")
-            return None
-    
-        optimizer=tf.train.AdamOptimizer(learning_rate=learningRate)
-        with tf.control_dependencies(self.update_ops): 
-            Trainables=optimizer.minimize(loss,var_list = self.variables)
-        valid_image_summary =tf.summary.image('test_image_output',self.outH)
-        loss_summary = tf.summary.scalar('Loss',loss)
-        iters=0
-        
-        self.saver = tf.train.Saver(var_list = self.variables) 
-        config=tf.ConfigProto()
-        config.gpu_options.allow_growth=True
-        self.sess = tf.Session(config=config)
-        train_summary_writer=tf.summary.FileWriter(os.path.join(self.summary_writer_dir,trainModel+'train'),self.sess.graph)
-        test_summary_writer=tf.summary.FileWriter(os.path.join(self.summary_writer_dir,trainModel+'test'),self.sess.graph)
-        self.sess.run(tf.global_variables_initializer())
-        if self.continue_training:
-            self.saver.restore(self.sess,self.restoreModelPath)
-        process = psutil.Process(os.getpid())
-        self.dataObj.resetTrainBatch()
-        self.dataObj.resetTestBatch()
-        
-            
-        
-            
-        while not self.dataObj.epoch == self.maxEpoch :
-            t1=time.time()
-            inp,gt =dataGrabber(False)
-#             import matplotlib.pyplot as plt 
-#             plt.imshow(np.uint8(inp[0]))
-#             plt.figure()
-#             plt.imshow(np.uint8(gt[0]))
-#             s
-            _,lval,t_summaries= self.sess.run([Trainables,loss,loss_summary], feed_dict= {self.inputs : inp,self.output : gt,self.phase : True})        
-#             import matplotlib.pyplot as plt 
-#             plt.imshow(np.uint8(output_tmp[0]))
-#             s
-            t2=time.time()      
-            if not iters % self.print_freq:
-                info = "Model Hallucinator_s{} Epoch  {} : Iteration : {}/{} loss value : {:0.4f} \n".format(self.scale,self.dataObj.epoch,iters,(self.maxEpoch)*int(self.dataObj.dataLength/self.dataObj.batchSize),lval) +"Memory used : {:0.4f} GB Time per batch : {:0.3f}s Model : {} \n".format(process.memory_info().rss/100000000.,t2-t1,self.modelName) 
-                print (info)   
-                self.logger.write(info)
-                train_summary_writer.add_summary(t_summaries,iters)
+            gradientsList = []
+            lossList = []
+            perGPUBatch = self.batchSize//self.num_gpus
+            for gpu_n in range(self.num_gpus):
+                with tf.device('/gpu:%d' % gpu_n):
+                    with tf.variable_scope(scope,reuse= tf.AUTO_REUSE):
+                        print (gpu_n * perGPUBatch,(gpu_n+1) *perGPUBatch)
+                        _inp = self.inputs[gpu_n * perGPUBatch: (gpu_n+1) *perGPUBatch]
+                        _out = self.output[gpu_n * perGPUBatch: (gpu_n+1) *perGPUBatch]
+                        outH = model(_inp)
+                        loss = self.loss(_pred =outH,_gt = _out)
+                        lossList.append(loss)
+                        optimizer=tf.train.AdamOptimizer(learning_rate=learningRate)
+                        update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+                        with tf.control_dependencies(update_ops): 
+                            gradients=optimizer.compute_gradients(loss)
+                        if gpu_n == 0 :
+                            valid_image_summary =tf.summary.image('test_image_output',outH)
+                            loss_summary = tf.summary.scalar('Loss',loss)
+                        gradientsList.append(gradients)
+            averagedLoss = tf.reduce_mean(lossList)
+            averagedGradients = self.average_gradients(gradientsList)
+            Trainables = optimizer.apply_gradients(averagedGradients)
+            iters=0
+            self.saver = tf.train.Saver() 
+            config=tf.ConfigProto()
+            config.gpu_options.allow_growth=True
+            config.allow_soft_placement = True
+            #config.log_device_placement = True
+            self.sess = tf.Session(config=config)
+            train_summary_writer=tf.summary.FileWriter(os.path.join(self.summary_writer_dir,trainModel+'train'),self.sess.graph)
+            test_summary_writer=tf.summary.FileWriter(os.path.join(self.summary_writer_dir,trainModel+'test'),self.sess.graph)     
+            self.sess.run(tf.global_variables_initializer())
+            while not self.dataObj.epoch == self.maxEpoch :
+                t1=time.time()
+                inp,gt =dataGrabber(False)
+                _,lval,t_summaries= self.sess.run([Trainables,averagedLoss,loss_summary], feed_dict= {self.inputs : inp,self.output : gt,self.phase : True})
+                t2=time.time()    
                 
-            if not iters % self.save_freq:
-                info="Model Saved at iteration {}\n".format(iters)
-                print (info)
-                self.logger.write(info)
-                self.saveModel(iters,trainModel)
-                
-            if not iters % self.val_freq :           
-                val_inp,val_gt  = dataGrabberTest()
-                if trainModel == "TEACHER":
-                    val_inp = np.copy(val_gt)
-#                 import matplotlib.pyplot as plt 
-#                 plt.imshow(np.uint8(val_inp[0]))
-#                 plt.figure()
-#                 plt.imshow(np.uint8(val_gt[0]))
-#                 s
-                val_loss,v_summaries,v_img_summaries = self.sess.run([loss,loss_summary,valid_image_summary],feed_dict={self.inputs : val_inp,self.output : val_gt,self.phase:False})  
-                test_summary_writer.add_summary(v_summaries, iters)
-                test_summary_writer.add_summary(v_img_summaries,iters)
-                info = "Validation Loss at iteration{} : {}\n".format(iters, val_loss)
-                print (info)
-                self.logger.write(info)
-            iters+=1
-        print ("Training done ")
-        self.saveModel(iters,trainModel)
-        self.logger.close()
+                if not iters % self.print_freq:
+                    info = "Model Hallucinator_s{} Epoch  {} : Iteration : {}/{} loss value : {:0.4f} \n".format(self.scale,self.dataObj.epoch,iters,(self.maxEpoch)*int(self.dataObj.dataLength/self.dataObj.batchSize),lval) +"Memory used : {:0.4f} GB Time per batch : {:0.3f}s Model : {} \n".format(process.memory_info().rss/100000000.,t2-t1,self.modelName) 
+                    print (info)   
+                    self.logger.write(info)
+                    train_summary_writer.add_summary(t_summaries,iters)
+
+                if not iters % self.save_freq:
+                    info="Model Saved at iteration {}\n".format(iters)
+                    print (info)
+                    self.logger.write(info)
+                    self.saveModel(iters,trainModel)
+
+                if not iters % self.val_freq :           
+                    val_inp,val_gt  = dataGrabberTest()
+                    if trainModel == "TEACHER":
+                        val_inp = np.copy(val_gt)
+    #                 import matplotlib.pyplot as plt 
+    #                 plt.imshow(np.uint8(val_inp[0]))
+    #                 plt.figure()
+    #                 plt.imshow(np.uint8(val_gt[0]))
+    #                 s
+                    val_loss,v_summaries,v_img_summaries = self.sess.run([averagedLoss,loss_summary,valid_image_summary],feed_dict={self.inputs : val_inp,self.output : val_gt,self.phase:False})  
+                    test_summary_writer.add_summary(v_summaries, iters)
+                    test_summary_writer.add_summary(v_img_summaries,iters)
+                    info = "Validation Loss at iteration{} : {}\n".format(iters, val_loss)
+                    print (info)
+                    self.logger.write(info)
+                iters+=1
+            print ("Training done ")
+            self.saveModel(iters,trainModel)
+            self.logger.close()
     
     def testAll(self,modelChoice ):
         self.dataObj.resetTestBatch()
@@ -297,37 +308,30 @@ class Hallucinator ():
         output = self.sess.run(self.stage1,{self.inputs:img,self.phase : False})
         output = self.sess.run(self.stage2,{self.inputs:output,self.phase : False})
         return self.dataObj.postProcessImages(output)
-        
-    def loss (self) :
-        with tf.variable_scope("Final_loss"):
-            return self.lambda1*self.l2_loss() + self.lambda2*self.smoothing_loss() 
 
-    def l2_loss(self):
+    def loss (self,_pred,_gt) :
+        with tf.variable_scope("Final_loss"):
+            return self.lambda1*self.l2_loss(_pred,_gt) + self.lambda2*self.smoothing_loss(_pred,_gt) 
+
+    def l2_loss(self,_pred,_gt):
         with tf.variable_scope ("RMSE_loss"):
-            return tf.sqrt(tf.losses.mean_squared_error(self.output,self.outH))  
-    
-    def autoEncoderLoss(self):
-        with tf.variable_scope("Autoencoder_loss"):
-            return tf.sqrt(tf.losses.mean_squared_error(self.output,self.outH))  
-        
-    
-    def smoothing_loss(self):
+            return tf.sqrt(tf.losses.mean_squared_error(_pred,_gt))  
+   
+    def smoothing_loss(self,_pred,_gt):
         with tf.variable_scope ("smoothing_loss") :
-            I_Hgrad    = tf.image.sobel_edges(self.outH)
+            I_Hgrad    = tf.image.sobel_edges(_pred)
             I_Hedge    = I_Hgrad[:,:,:,:,0] + I_Hgrad[:,:,:,:,1]
             zeros      = tf.zeros_like(I_Hedge)
             I_Hhuber   = tf.losses.huber_loss(I_Hedge,zeros,delta = self.huberDelta,reduction=tf.losses.Reduction.NONE)
 
-            I_RGBgrad  = tf.image.sobel_edges(self.output)
+            I_RGBgrad  = tf.image.sobel_edges(_gt)
             I_RGBedge  = I_RGBgrad[:,:,:,:,0] + I_RGBgrad[:,:,:,:,1]
             I_RGBhuber = tf.losses.huber_loss(I_RGBedge,zeros,delta = self.huberDelta, reduction=tf.losses.Reduction.NONE)
-
             edge_aware_weight   = tf.exp(-1*I_RGBhuber)
             weighted_smooth_img = tf.multiply(I_Hhuber, edge_aware_weight)
             loss_val = tf.reduce_mean(weighted_smooth_img) 
         return loss_val
-    def rmse (self,v1,v2,endPoint):
-        return tf.sqrt(tf.losses.mean_squared_error(self.teacherEndpoints[endPoint],self.generatorEndpoints[endPoint]))   
+
                        
     def featureSpaceLoss (self):
         with tf.variable_scope("Featurespace_loss"):
@@ -392,24 +396,7 @@ class Hallucinator ():
         else :
             saver=tf.train.Saver(var_list = self.variables)
             saver.restore(sess,self.restoreModelPath)
-        self.sess=sess
+        self.sess=sess 
         
-        
-    def layerWise1 (self) :
-        
-        with tf.variable_scope("preTrain_1") :
-            eb0 = initial_block(self.inputs, is_training=self.phase,scope='initial_block')
-            
-            eb1 = encoder_block(eb0, self.filters[0], 3, 1, self.phase,scope='eb1', padding='same')
-            
-            dbi = decoder_block(eb1, self.filters_m[-1], self.filters_n[-1], 3, 1,is_training=self.phase,scope='db1', padding='same')            
-            net = dbi
 
-            net = upconv_bn_relu(net, 32, 3, 2, is_training=self.phase,
-                                 scope='conv_transpose')
-            net = conv_bn_relu(net, 32, 3, 1, is_training=self.phase,
-                               scope='conv')
-            # Last layer, no batch normalization or activation
-            logits = tf.layers.conv2d_transpose(net, 3 ,kernel_size=2, strides=2,padding='same',name='conv_transpose',kernel_initializer=he_normal())
-        
-            return  logits
+
