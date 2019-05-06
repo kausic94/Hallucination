@@ -35,9 +35,7 @@ class Hallucinator ():
         self.phase=tf.placeholder(tf.bool,name = "phase")
         self.output  =tf.placeholder(tf.float32,(None,self.imageHeight,self.imageWidth,self.channels),name='grountTruth')
         self.dataObj = Dataset.dataReader(self.dataArguments)
-        self.filters = [64, 128, 256, 512]
-        self.filters_m = [64, 128, 256, 512][::-1]
-        self.filters_n = [64, 64, 128, 256][::-1]
+        
         self.continue_training = False
         if not os.path.exists(self.summary_writer_dir):
             os.makedirs(self.summary_writer_dir)
@@ -62,6 +60,9 @@ class Hallucinator ():
         if self.model_choice == "APG" :
             self.model = self.generateImage()
         elif self.model_choice == "linknet":
+            self.filters = [64, 128, 256, 512]
+            self.filters_m = [64, 128, 256, 512][::-1]
+            self.filters_n = [64, 64, 128, 256][::-1]
             self.generatorModel = lambda inp: linknet(inp,num_classes =3,reuse = None,is_training = self.phase)
         elif self.model_choice == "aggregated":
             print ("Trying out new architecture")
@@ -155,7 +156,19 @@ class Hallucinator ():
         average_grads.append(grad_and_var)
       return average_grads
 
-
+    def initModel(self,trainModel):
+        if trainModel == 'GENERATOR':
+                print ("The Generator model is being initialized right now")
+                self.learningRate = self.generatorLearningRate
+                self.dataGrabber = self.dataObj.nextTrainBatch
+                self.dataGrabberTest = self.dataObj.nextTestBatch
+                self.scope = self.generatorScope
+                self.model = self.generatorModel
+                return True
+                
+        else :
+            print ("Invalid model choice")
+            
     def train(self,trainModel): 
         with tf.device ('/cpu:0'):
             self.logger = open(self.logDir,'w')
@@ -164,31 +177,23 @@ class Hallucinator ():
             self.logger.write(self.confInfo +'\n\n\n')
             self.dataObj.resetTrainBatch()
             self.dataObj.resetTestBatch()
-            if trainModel == 'GENERATOR':
-                print ("The Generator model is being trained right now")
-                learningRate = self.generatorLearningRate
-                dataGrabber = self.dataObj.nextTrainBatch
-                dataGrabberTest = self.dataObj.nextTestBatch
-                scope = self.generatorScope
-                model = self.generatorModel
-                process = psutil.Process(os.getpid())
-            else :
+            process = psutil.Process(os.getpid())
+            ret = self.initModel(trainModel)
+            if not ret :
                 print ("Invalid model choice")
                 return None
-            
             gradientsList = []
             lossList = []
             perGPUBatch = self.batchSize//self.num_gpus
             for gpu_n in range(self.num_gpus):
                 with tf.device('/gpu:%d' % gpu_n):
-                    with tf.variable_scope(scope,reuse= tf.AUTO_REUSE):
-                        print (gpu_n * perGPUBatch,(gpu_n+1) *perGPUBatch)
+                    with tf.variable_scope(self.scope,reuse= tf.AUTO_REUSE):
                         _inp = self.inputs[gpu_n * perGPUBatch: (gpu_n+1) *perGPUBatch]
                         _out = self.output[gpu_n * perGPUBatch: (gpu_n+1) *perGPUBatch]
-                        outH = model(_inp)
+                        outH = self.model(_inp)
                         loss = self.loss(_pred =outH,_gt = _out)
                         lossList.append(loss)
-                        optimizer=tf.train.AdamOptimizer(learning_rate=learningRate)
+                        optimizer=tf.train.AdamOptimizer(learning_rate=self.learningRate)
                         update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
                         with tf.control_dependencies(update_ops): 
                             gradients=optimizer.compute_gradients(loss)
@@ -211,7 +216,7 @@ class Hallucinator ():
             self.sess.run(tf.global_variables_initializer())
             while not self.dataObj.epoch == self.maxEpoch :
                 t1=time.time()
-                inp,gt =dataGrabber(False)
+                inp,gt =self.dataGrabber(False)
                 _,lval,t_summaries= self.sess.run([Trainables,averagedLoss,loss_summary], feed_dict= {self.inputs : inp,self.output : gt,self.phase : True})
                 t2=time.time()    
                 
@@ -228,7 +233,7 @@ class Hallucinator ():
                     self.saveModel(iters,trainModel)
 
                 if not iters % self.val_freq :           
-                    val_inp,val_gt  = dataGrabberTest()
+                    val_inp,val_gt  = self.dataGrabberTest()
                     if trainModel == "TEACHER":
                         val_inp = np.copy(val_gt)
     #                 import matplotlib.pyplot as plt 
@@ -249,26 +254,13 @@ class Hallucinator ():
     
     def testAll(self,modelChoice ):
         self.dataObj.resetTestBatch()
-        self.restoreModel(modelChoice)
+        outH = self.restoreModel(modelChoice)
         loss=[]
-        if modelChoice == "TEACHER":    
-            loss_func = self.autoEncoderLoss()
-            dataGrabber = self.dataObj.nextAutoencoderTestBatch
-        elif modelChoice == "GENERATOR" :
-            loss_func = self.loss()
-            corruptionFlag = False
-        else : 
-            print ("INVALID MODEL CHOICE !!!")
-            return None
+        loss_func = tf.reduce_mean(tf.abs(outH - self.output))
         print ("Testing")
         while not self.dataObj.test_epoch == 1 :
-            x,y = dataGrabber()
-            
-            if modelChoice == 'TEACHER' :
-                print ("---------------------------------------")
-                lval= self.sess.run(loss_func, feed_dict= {self.inputs : y,self.output:y, self.phase : False})
-            if modelChoice == 'GENERATOR':
-                lval= self.sess.run(loss_func, feed_dict= {self.inputs : x ,self.phase : False ,self.output : y})
+            x,y = self.dataGrabberTest()
+            lval= self.sess.run(loss_func, feed_dict= {self.inputs : x ,self.phase : False ,self.output : y})
             loss.append(lval)
             print("Test start : {} Model: {} Test Loss : {}".format(self.dataObj.test_start,self.modelName,lval))
         return np.mean(loss)
@@ -359,44 +351,15 @@ class Hallucinator ():
                 self.sess.close()
                 
         sess=tf.Session()
-        if modelChoice == "TEACHER":
-            print ("Restoring Teacher model")
-            with tf.variable_scope(self.teacherScope):
-                self.outH,self.teacherEndpoints = linknet(self.inputs,num_classes =3,reuse = None,is_training = self.phase)
-            self.variables = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES,scope = self.teacherScope) 
-            self.update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS,scope = self.teacherScope)
-        elif modelChoice == "GENERATOR":
-            print ("Restoring Generator model")
-            with tf.variable_scope(self.generatorScope):
-                self.outH,self.generatorEndpoints = linknet(self.inputs,num_classes =3,reuse = None,is_training = self.phase)
-            self.variables =  tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES,scope = self.generatorScope)
-            self.update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS,scope = self.generatorScope)
-        
-        elif modelChoice == "BOTH":
-            print ("Restoring Generator and Teacher modelmodel")
-            with tf.variable_scope(self.generatorScope):
-                self.stage1,self.generatorEndpoints = linknet(self.inputs,num_classes =3,reuse = None,is_training = self.phase)
-                variables_gen =  tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES,scope = self.generatorScope)
-                update_ops_gen = tf.get_collection(tf.GraphKeys.UPDATE_OPS,scope = self.generatorScope)
-            with tf.variable_scope(self.teacherScope):
-                self.stage2,self.teacherEndpoints = linknet(self.inputs,num_classes =3,reuse = None,is_training = self.phase)
-                variables_teach = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES,scope = self.teacherScope) 
-                update_ops_teach = tf.get_collection(tf.GraphKeys.UPDATE_OPS,scope = self.teacherScope)
-            
-        else :
-            print ("INVALID MODEL CHOICE")
+        ret = self.initModel(modelChoice)
+        if not ret :
+            print ("Invalid model Choice")
             return None
-        
-        
-        if modelChoice == 'BOTH':
-            saver = tf.train.Saver(var_list=variables_gen)
-            saver.restore(sess,tf.train.latest_checkpoint(os.path.join(self.modelLocation,"GENERATOR")))
-            saver = tf.train.Saver(var_list=variables_teach)
-            saver.restore(sess,tf.train.latest_checkpoint(os.path.join(self.modelLocation,"TEACHER")))
-        else :
-            saver=tf.train.Saver(var_list = self.variables)
-            saver.restore(sess,self.restoreModelPath)
-        self.sess=sess 
-        
-
-
+        with tf.variable_scope(self.scope):
+            outH =  self.model(self.inputs)
+        variables =  tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES,scope = self.scope)
+        update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS,scope = self.scope)
+        saver=tf.train.Saver(var_list = variables)
+        saver.restore(sess,self.restoreModelPath)
+        self.sess=sess
+        return outH
